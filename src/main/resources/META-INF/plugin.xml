@@ -1,0 +1,53 @@
+<!-- Plugin Configuration File: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+  <id>ai.opencode.jetbrains</id>
+  <name>OpenCode</name>
+  <vendor email="hhlai1990@gmail.com" url="https://opencode.ai">OpenCode</vendor>
+
+  <description><![CDATA[
+    OpenCode IDE Plugin.<br>
+    - Open/Focus: Cmd+Esc (Mac) / Ctrl+Esc (Win/Linux)<br>
+    - Add to Terminal: Opt+Cmd+K (Mac) / Ctrl+Alt+K (Win/Linux)
+  ]]></description>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>org.jetbrains.plugins.terminal</depends>
+
+  <actions>
+    <action id="OpenCode.QuickLaunch"
+            class="ai.opencode.jetbrains.QuickLaunchAction"
+            text="Open OpenCode"
+            description="Open or focus the OpenCode terminal"
+            icon="/icons/opencode.svg">
+      <add-to-group group-id="ToolsMenu" anchor="first"/>
+      <keyboard-shortcut keymap="$default" first-keystroke="control ESCAPE"/>
+      <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta ESCAPE"/>
+      <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta ESCAPE"/>
+    </action>
+
+    <action id="OpenCode.AddLines"
+            class="ai.opencode.jetbrains.SendSelectionToTerminalAction"
+            text="Add lines to OpenCode Terminal">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+      <keyboard-shortcut keymap="$default" first-keystroke="control alt K"/>
+      <keyboard-shortcut keymap="Mac OS X" first-keystroke="alt meta K"/>
+      <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="alt meta K"/>
+    </action>
+
+    <action id="OpenCode.AddFile"
+            class="ai.opencode.jetbrains.SendSelectionToTerminalAction"
+            text="Add to OpenCode Terminal">
+      <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+      <keyboard-shortcut keymap="$default" first-keystroke="control alt K"/>
+      <keyboard-shortcut keymap="Mac OS X" first-keystroke="alt meta K"/>
+      <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="alt meta K"/>
+    </action>
+  </actions>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow id="OpenCode"
+                factoryClass="ai.opencode.jetbrains.OpenCodeToolWindowFactory"
+                icon="/icons/opencode.svg"
+                anchor="right"/>
+  </extensions>
+</idea-plugin>

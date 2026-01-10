@@ -1,0 +1,1 @@
+rootProject.name = "opencode_jetbrains_plugin"
