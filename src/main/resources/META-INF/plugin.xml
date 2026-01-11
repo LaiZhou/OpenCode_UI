@@ -6,7 +6,7 @@
 
   <description><![CDATA[
     OpenCode IDE Plugin.<br>
-    - Toggle Terminal: Use Cmd + Esc (Mac) or Ctrl + Esc (Win/Linux) to jump to the OpenCode Terminal.
+    - Toggle Terminal: Use Cmd + Esc (Mac) or Ctrl + Esc (Win/Linux) to jump to the OpenCode Terminal.<br>
     - Add Context: Select code or a file and press Option + Cmd + K (Mac) or Ctrl + Alt + K (Win/Linux) to send the reference to the terminal.
   ]]></description>
 
