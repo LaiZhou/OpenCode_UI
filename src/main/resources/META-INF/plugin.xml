@@ -1,8 +1,8 @@
 <!-- Plugin Configuration File: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-  <id>ai.opencode.jetbrains</id>
-  <name>OpenCode</name>
-  <vendor email="hhlai1990@gmail.com" url="https://opencode.ai">OpenCode</vendor>
+  <id>ai.opencode.ide.jetbrains</id>
+  <name>OpenCode UI</name>
+  <vendor email="hhlai1990@gmail.com" url="https://opencode.ai">JesseZ</vendor>
 
   <description><![CDATA[
     OpenCode IDE Plugin.<br>
@@ -15,7 +15,7 @@
 
   <actions>
     <action id="OpenCode.QuickLaunch"
-            class="ai.opencode.jetbrains.QuickLaunchAction"
+            class="ai.opencode.ide.jetbrains.QuickLaunchAction"
             text="Open OpenCode"
             description="Open or focus the OpenCode terminal"
             icon="/icons/opencode.svg">
@@ -26,7 +26,7 @@
     </action>
 
     <action id="OpenCode.AddLines"
-            class="ai.opencode.jetbrains.SendSelectionToTerminalAction"
+            class="ai.opencode.ide.jetbrains.SendSelectionToTerminalAction"
             text="Add lines to OpenCode Terminal">
       <add-to-group group-id="EditorPopupMenu" anchor="last"/>
       <keyboard-shortcut keymap="$default" first-keystroke="control alt K"/>
@@ -35,7 +35,7 @@
     </action>
 
     <action id="OpenCode.AddFile"
-            class="ai.opencode.jetbrains.SendSelectionToTerminalAction"
+            class="ai.opencode.ide.jetbrains.SendSelectionToTerminalAction"
             text="Add to OpenCode Terminal">
       <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
       <keyboard-shortcut keymap="$default" first-keystroke="control alt K"/>
@@ -46,7 +46,7 @@
 
   <extensions defaultExtensionNs="com.intellij">
     <toolWindow id="OpenCode"
-                factoryClass="ai.opencode.jetbrains.OpenCodeToolWindowFactory"
+                factoryClass="ai.opencode.ide.jetbrains.OpenCodeToolWindowFactory"
                 icon="/icons/opencode.svg"
                 anchor="right"/>
   </extensions>

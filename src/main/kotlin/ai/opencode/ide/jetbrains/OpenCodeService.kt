@@ -1,4 +1,4 @@
-package ai.opencode.jetbrains
+package ai.opencode.ide.jetbrains
 
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project

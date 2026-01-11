@@ -1,4 +1,4 @@
-package ai.opencode.jetbrains
+package ai.opencode.ide.jetbrains
 
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
