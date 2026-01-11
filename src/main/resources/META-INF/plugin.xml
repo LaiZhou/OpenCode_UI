@@ -6,8 +6,8 @@
 
   <description><![CDATA[
     OpenCode IDE Plugin.<br>
-    - Open/Focus: Cmd+Esc (Mac) / Ctrl+Esc (Win/Linux)<br>
-    - Add to Terminal: Opt+Cmd+K (Mac) / Ctrl+Alt+K (Win/Linux)
+    - Toggle Terminal: Use Cmd + Esc (Mac) or Ctrl + Esc (Win/Linux) to jump to the OpenCode Terminal.
+    - Add Context: Select code or a file and press Option + Cmd + K (Mac) or Ctrl + Alt + K (Win/Linux) to send the reference to the terminal.
   ]]></description>
 
   <depends>com.intellij.modules.platform</depends>
