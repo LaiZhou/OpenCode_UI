@@ -2,11 +2,10 @@ plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.1.20"
     id("org.jetbrains.intellij.platform") version "2.10.2"
-
 }
 
 group = "ai.opencode"
-version = "1.0.2"
+version = "1.0.3"
 
 repositories {
     mavenCentral()
@@ -25,6 +24,11 @@ dependencies {
         bundledPlugin("org.jetbrains.plugins.terminal")
 
     }
+
+    // HTTP client and JSON
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
+    implementation("com.google.code.gson:gson:2.11.0")
 }
 
 intellijPlatform {

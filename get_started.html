@@ -6,34 +6,41 @@
 
 <h2>Key Features</h2>
 <ul>
-  <li><b>Quick Launch:</b> Instantly create or focus an "OpenCode" terminal session with a single shortcut.</li>
-  <li><b>Context Sharing:</b> Seamlessly send code selections or file references (with line numbers) from your editor or project view directly to the AI agent.</li>
-  <li><b>Integrated Sidebar:</b> Access the tool quickly via the OpenCode icon in the right sidebar.</li>
+  <li><b>Quick Launch:</b> Instantly create or focus an "OpenCode" terminal session with a single shortcut (Cmd+Esc / Ctrl+Esc). The terminal launches only when you need it.</li>
+  <li><b>Context Sharing:</b> Seamlessly send code selections or file references (with line numbers) from your editor or project view directly to the AI agent (Opt+Cmd+K).</li>
+  <li><b>Diff Review:</b> Automatically review AI-generated code changes in chronological order using a native multi-file diff viewer.</li>
+  <li><b>Context Tracking:</b> View current file context in the status bar and click to share it instantly.</li>
 </ul>
 
 <br>
 
 <p>Follow these steps to set up and start using the OpenCode plugin:</p>
 <ol>
-  <li>Install a <b>compatible JetBrains IDE</b>, such as IntelliJ IDEA, WebStorm, PyCharm, or other IntelliJ-based IDEs (version 2025.2 or later).</li>
-  <li><b>Install the OpenCode CLI:</b> This plugin acts as a bridge to the CLI tool. Ensure you have it installed on your system by running:
+  <li>Install a <b>compatible JetBrains IDE</b> (version 2025.2 or later).</li>
+  <li><b>Install the OpenCode CLI:</b> This plugin acts as a bridge to the CLI tool. Ensure you have it installed:
     <br><code>npm install -g opencode</code>
   </li>
-  <li>Launch your IDE, open <b>Settings</b> (Preferences on macOS), and navigate to <b>Plugins</b>.</li>
-  <li>Search for <b>OpenCode</b> in the Marketplace and click <b>Install</b>.</li>
-  <li>Once installed, press <code>Cmd + Esc</code> (Mac) or <code>Ctrl + Esc</code> (Windows/Linux) to launch your first session.</li>
+  <li><b>Ensure Git is installed:</b> The plugin uses local git commands for managing changes.</li>
+  <li>Launch your IDE and ensure the plugin is enabled.</li>
+  <li>Press <code>Cmd + Esc</code> (Mac) or <code>Ctrl + Esc</code> (Windows/Linux) to launch your first session.</li>
 </ol>
 
 <h2>Usage and Shortcuts</h2>
 <ul>
-  <li><b>Toggle Terminal:</b> Use <code>Cmd + Esc</code> (Mac) or <code>Ctrl + Esc</code> (Win/Linux) to jump to the OpenCode session.</li>
-  <li><b>Add Context:</b> Select code or a file and press <code>Opt + Cmd + K</code> (Mac) or <code>Ctrl + Alt + K</code> (Win/Linux) to send the reference to the terminal.</li>
+  <li><b>Toggle Terminal:</b> <code>Cmd + Esc</code> (Mac) / <code>Ctrl + Esc</code> (Win/Linux) - Opens/focuses the terminal.</li>
+  <li><b>Add Context:</b> <code>Opt + Cmd + K</code> (Mac) / <code>Ctrl + Alt + K</code> (Win/Linux) - Sends file references/selection to the terminal.</li>
+  <li><b>Review Changes:</b> When OpenCode finishes a task, a notification will appear. Click <b>Review Changes</b> to open the diff viewer.</li>
+</ul>
+
+<h2>Diff Viewer Guide</h2>
+<ul>
+  <li><b>Order:</b> Diffs are presented in the order they were generated (chronological).</li>
+  <li><b>Navigation:</b> Use <code>←</code> / <code>→</code> arrows to switch between modified files.</li>
+  <li><b>Jump Changes:</b> Use <code>↑</code> / <code>↓</code> to jump between specific changes in the current file.</li>
+  <li><b>Accept/Reject:</b> Use the toolbar buttons. <b>Accept</b> stages the file (git add). <b>Reject</b> reverts the file locally (git restore/rm) with Local History protection.</li>
 </ul>
 
 <h2>Plugin Compatibility</h2>
 <p>
-  <b>Complementary Plugins:</b> This plugin requires the <b>Terminal</b> plugin (which is bundled by default in most JetBrains IDEs) to function correctly.
-</p>
-<p>
-  <b>Conflicting Plugins:</b> There are no known conflicting plugins. If you have custom keymaps assigned to the default OpenCode shortcuts, you can easily reconfigure them in <b>Settings | Keymap</b>.
+  <b>Complementary Plugins:</b> This plugin requires the <b>Terminal</b> plugin (bundled by default).
 </p>

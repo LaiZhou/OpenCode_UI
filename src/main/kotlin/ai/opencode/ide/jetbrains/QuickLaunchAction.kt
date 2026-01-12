@@ -5,7 +5,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
 
 /**
- * Quick Launch Action: 
+ * Quick Launch Action:
  * Opens or focuses a terminal tab named "OpenCode".
  */
 class QuickLaunchAction : AnAction() {

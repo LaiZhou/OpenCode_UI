@@ -12,7 +12,20 @@ A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the o
 | Feature | Description | Shortcut (Mac) | Shortcut (Win/Linux) |
 |---------|-------------|----------------|----------------------|
 | **Quick Launch** | Open or focus the OpenCode terminal | `Cmd + Esc` | `Ctrl + Esc` |
-| **Add to Terminal** | Send selected code or files to OpenCode | `Opt + Cmd + K` | `Ctrl + Alt + K` |
+| **Add to Terminal** | Send current file/selection or selected files to OpenCode | `Opt + Cmd + K` | `Ctrl + Alt + K` |
+| **Diff Review** | View diffs and accept/reject changes in IDE | — | — |
+| **Context Tracking** | Status bar shows current file/selection context | — | — |
+
+### Feature Comparison with Claude Code
+
+| Feature | Claude Code | OpenCode |
+|---------|-------------|----------|
+| Quick Launch | ✅ | ✅ |
+| Diff Viewing | ✅ | ✅ |
+| File Reference Shortcuts | ✅ | ✅ |
+| Selection Context Tracking | ✅ | ✅ |
+| Status Bar Context Widget | ❌ | ✅ |
+| Diagnostic Sharing | ✅ | ❌ (uses built-in LSP) |
 
 ### Sidebar Icon
 
@@ -20,8 +33,8 @@ Click the **OpenCode** icon in the right sidebar to instantly focus or create an
 
 ### Context Menus
 
-- **Editor**: Right-click on selected text → *Add lines to OpenCode Terminal*
-- **Project View**: Right-click on files/folders → *Add to OpenCode Terminal*
+- **Editor**: Right-click in editor → *OpenCode: Add Context*
+- **Project View**: Right-click on files/folders → *OpenCode: Add File(s)*
 
 ## Requirements
 
@@ -52,14 +65,18 @@ Press `Cmd+Esc` (Mac) or `Ctrl+Esc` (Win/Linux) to open the OpenCode terminal. I
 
 ### 2. Send Code Context to OpenCode
 
-Select code in the editor or files in the Project View, then press `Opt+Cmd+K` (Mac) or `Ctrl+Alt+K` (Win/Linux).
+In the editor or Project View, press `Opt+Cmd+K` (Mac) or `Ctrl+Alt+K` (Win/Linux).
+
+- If the OpenCode terminal is not open yet, the plugin creates/focuses it automatically.
+- In the editor, it shares the **current file** even if nothing is selected.
 
 ![Step 2: Selection](images/2.png)
 
 The plugin will send:
 
-- **For editor selection**: `@path/to/file.kt#L10-25`
-- **For file selection**: `@path/to/file.kt` for each selected file
+- **Editor selection**: `@path/to/file.kt#L10-25`
+- **Editor (no selection)**: `@path/to/file.kt`
+- **Project View selection**: `@path/to/file.kt` for each selected file
 
 ![Step 3: Result in Terminal](images/3.png)
 
@@ -70,6 +87,30 @@ This allows OpenCode to understand the context of your question or request.
 Click the OpenCode icon in the right sidebar to quickly focus or create the OpenCode terminal.
 
 ![Step 4: Sidebar Button](images/4.png)
+
+### 4. Review Diffs
+
+When OpenCode edits files, the plugin opens a native IDE diff viewer.
+
+- **Chronological View**: Automatically shows changes in the order they were made by OpenCode (replay thought process), starting from the first modified file.
+- **Navigation**: Use **← →** arrows to switch files and **↑ ↓** arrows to jump between changes in a file.
+- **Trigger**: The diff viewer opens automatically when OpenCode finishes a response (session idle).
+- **Accept**: Stages the changes locally (`git add`), marking them as reviewed.
+- **Reject**: Discards changes locally (`git restore` for modified files, `rm` for new files). This is a safe local operation.
+- **Auto-advance**: After accepting/rejecting, the plugin automatically opens the next pending diff.
+
+![Diff Viewer - Accept](images/5.png)
+![Diff Viewer - Reject](images/6.png)
+
+### 5. Context Tracking (Status Bar)
+
+The status bar can show an **OpenCode icon** that tracks the current file/selection.
+
+- Hover the icon to see the current context (file and optional line range)
+- Click the icon to add the current context to the OpenCode terminal
+- Enable/disable via **Status Bar Widgets** settings (right-click status bar)
+
+Context updates automatically as you navigate and select code.
 
 ## Keyboard Shortcuts
 

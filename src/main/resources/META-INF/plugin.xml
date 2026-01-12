@@ -5,9 +5,17 @@
   <vendor email="hhlai1990@gmail.com" url="https://opencode.ai">JesseZ</vendor>
 
   <description><![CDATA[
-    OpenCode IDE Plugin.<br>
-    - Toggle Terminal: Use Cmd + Esc (Mac) or Ctrl + Esc (Win/Linux) to jump to the OpenCode Terminal.<br>
-    - Add Context: Select code or a file and press Option + Cmd + K (Mac) or Ctrl + Alt + K (Win/Linux) to send the reference to the terminal.
+    <b>OpenCode UI - AI Coding Agent for JetBrains IDEs</b><br><br>
+    
+    Seamlessly integrates <a href="https://opencode.ai">OpenCode</a> directly into your workflow.<br><br>
+    
+    <b>Key Features:</b><br>
+    <ul>
+        <li><b>Quick Launch:</b> Instantly create or focus the OpenCode terminal with <code>Cmd+Esc</code> / <code>Ctrl+Esc</code>.</li>
+        <li><b>Context Sharing:</b> Send current file, selection, or Project View items to the agent with <code>Opt+Cmd+K</code> / <code>Ctrl+Alt+K</code>.</li>
+        <li><b>Native Diff Review:</b> Automatically review AI-generated changes in a multi-file diff viewer. Supports Accept (Stage) and Reject (Undo) directly from the UI.</li>
+        <li><b>Context Tracking:</b> Real-time status bar widget showing the current context being tracked.</li>
+    </ul>
   ]]></description>
 
   <depends>com.intellij.modules.platform</depends>
@@ -16,10 +24,9 @@
   <actions>
     <action id="OpenCode.QuickLaunch"
             class="ai.opencode.ide.jetbrains.QuickLaunchAction"
-            text="Open OpenCode"
+            text="OpenCode: Focus Terminal"
             description="Open or focus the OpenCode terminal"
             icon="/icons/opencode.svg">
-      <add-to-group group-id="ToolsMenu" anchor="first"/>
       <keyboard-shortcut keymap="$default" first-keystroke="control ESCAPE"/>
       <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta ESCAPE"/>
       <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta ESCAPE"/>
@@ -27,7 +34,7 @@
 
     <action id="OpenCode.AddLines"
             class="ai.opencode.ide.jetbrains.SendSelectionToTerminalAction"
-            text="Add lines to OpenCode Terminal">
+            text="OpenCode: Add Context">
       <add-to-group group-id="EditorPopupMenu" anchor="last"/>
       <keyboard-shortcut keymap="$default" first-keystroke="control alt K"/>
       <keyboard-shortcut keymap="Mac OS X" first-keystroke="alt meta K"/>
@@ -36,7 +43,7 @@
 
     <action id="OpenCode.AddFile"
             class="ai.opencode.ide.jetbrains.SendSelectionToTerminalAction"
-            text="Add to OpenCode Terminal">
+            text="OpenCode: Add File(s)">
       <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
       <keyboard-shortcut keymap="$default" first-keystroke="control alt K"/>
       <keyboard-shortcut keymap="Mac OS X" first-keystroke="alt meta K"/>
@@ -45,9 +52,27 @@
   </actions>
 
   <extensions defaultExtensionNs="com.intellij">
+    <!-- Project-level Services -->
+    <projectService serviceImplementation="ai.opencode.ide.jetbrains.OpenCodeService"/>
+    <projectService serviceImplementation="ai.opencode.ide.jetbrains.session.SessionManager"/>
+    <projectService serviceImplementation="ai.opencode.ide.jetbrains.diff.DiffViewerService"/>
+    <projectService serviceImplementation="ai.opencode.ide.jetbrains.context.SelectionContextService"/>
+
+    <!-- Startup Activity for Selection Context -->
+    <postStartupActivity implementation="ai.opencode.ide.jetbrains.context.SelectionContextStartupActivity"/>
+
+    <!-- Status Bar Widget for Context Display -->
+    <statusBarWidgetFactory id="OpenCodeContext"
+                            implementation="ai.opencode.ide.jetbrains.context.OpenCodeContextWidgetFactory"
+                            order="after encodingWidget"/>
+
+    <!-- Notifications -->
+    <notificationGroup id="OpenCode" displayType="BALLOON"/>
+
     <toolWindow id="OpenCode"
                 factoryClass="ai.opencode.ide.jetbrains.OpenCodeToolWindowFactory"
                 icon="/icons/opencode.svg"
                 anchor="right"/>
+
   </extensions>
 </idea-plugin>

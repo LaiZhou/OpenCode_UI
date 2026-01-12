@@ -24,9 +24,14 @@ class OpenCodeToolWindowFactory : ToolWindowFactory {
         val content = ContentFactory.getInstance().createContent(JPanel(), "", false)
         toolWindow.contentManager.addContent(content)
 
-        // Focus terminal on creation
-        project.service<OpenCodeService>().focusOrCreateTerminal()
-        toolWindow.hide()
+        // Do NOT focus terminal on creation to respect user's choice at IDE startup.
+        // The terminal will only be created when the user explicitly clicks the icon
+        // or uses the keyboard shortcut.
+
+        // If the tool window is visible due to restored IDE state, hide it quietly.
+        if (toolWindow.isVisible) {
+            toolWindow.hide()
+        }
 
         // Listen for when this tool window is shown (sidebar icon clicked)
         project.messageBus.connect(toolWindow.disposable).subscribe(
