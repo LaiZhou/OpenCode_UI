@@ -19,7 +19,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.util.concurrency.AppExecutorUtil
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
-import org.jetbrains.plugins.terminal.TerminalToolWindowManager
+import org.jetbrains.plugins.terminal.TerminalView
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -91,10 +91,10 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     private fun createTerminalAndConnect(foundPort: Int) {
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return
-        val terminalManager = TerminalToolWindowManager.getInstance(project)
+        val terminalView = TerminalView.getInstance(project)
         val contentManager = toolWindow.contentManager
 
-        val widget = terminalManager.createLocalShellWidget(project.basePath, OPEN_CODE_TAB_NAME)
+        val widget = terminalView.createLocalShellWidget(project.basePath, OPEN_CODE_TAB_NAME)
         val newContent = contentManager.contents.lastOrNull()
         newContent?.displayName = OPEN_CODE_TAB_NAME
         newContent?.let { contentManager.setSelectedContent(it) }
@@ -278,10 +278,11 @@ class OpenCodeService(private val project: Project) : Disposable {
     fun pasteToTerminal(text: String): Boolean {
         if (text.isBlank()) return false
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return false
-        val terminalManager = TerminalToolWindowManager.getInstance(project)
+        val terminalView = TerminalView.getInstance(project)
+        val contentManager = toolWindow.contentManager
         val openCodeContent = toolWindow.contentManager.contents.find { it.displayName == OPEN_CODE_TAB_NAME } ?: return false
 
-        val widget = terminalManager.terminalWidgets.firstOrNull { 
+        val widget = terminalView.getWidgets().firstOrNull { 
             toolWindow.contentManager.getContent(it.component) == openCodeContent 
         } as? ShellTerminalWidget ?: return false
 
