@@ -37,7 +37,7 @@
 │  │  │ -  println("Hello")    │  │ +  println("Hello, World!")        │  │   │
 │  │  │  }                     │  │  }                                 │  │   │
 │  │  └────────────────────────┘  └────────────────────────────────────┘  │   │
-│  │  [Accept] (git add)   [Reject] (git restore/rm)                      │   │
+│  │  [Accept] (git add)   [Reject] (restore before)                     │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
@@ -45,7 +45,7 @@
 │  │  - discoverPort()                     - activeSessionId               │   │
 │  │  - connectToServer()                  - onDiffReceived()              │   │
 │  │  - getSessionDiff()                   - acceptDiff() -> git add       │   │
-│  │                                       - rejectDiff() -> git restore   │   │
+│  │                                       - rejectDiff() -> restore before │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                          │                                                   │
 │                          ▼ HTTP + SSE                                        │
@@ -76,10 +76,97 @@
 
 #### 4. Reject (拒绝变更)
 - **操作**: 用户点击 "Reject"。
-- **执行**:
-    - 若文件为 **Untracked** (新文件): 执行文件删除操作 (`rm`)。
-    - 若文件为 **Tracked** (已有文件): 执行 `git restore --source=HEAD --staged --worktree <file>`。
-- **效果**: 文件回滚到修改前的状态（HEAD），并在 Diff 列表中移除。
+- **执行**: 使用 `diff.before` 内容恢复文件（见下方详细策略）。
+- **效果**: 文件回滚到 **OpenCode 修改前** 的状态，并在 Diff 列表中移除。
+
+---
+
+## Accept/Reject 策略详解
+
+### 核心原则
+
+1. **Reject 恢复到 OpenCode 修改前的状态**，而非 Git HEAD
+2. **利用 `diff.before` 字段**：服务端返回的 Diff 数据包含 `before`（修改前）和 `after`（修改后）内容
+3. **LocalHistory 保护**：所有破坏性操作前先创建 LocalHistory 标签，防止误操作导致数据丢失
+4. **最小化副作用**：只修改 worktree 文件，不主动操作 Git staging area
+5. **空内容保护**：当 `before` 为空时，先判断文件是否已被 Git 跟踪；仅对未跟踪文件执行删除
+
+### 文件状态场景全覆盖
+
+以下是所有可能的文件状态组合及对应的 Accept/Reject 行为：
+
+| 场景 | 文件原状态 | OpenCode 操作 | `diff.before` | Accept 行为 | Reject 行为 |
+|------|-----------|---------------|---------------|-------------|-------------|
+| **A** | 不存在 | 创建新文件 | `""` (空字符串) | `git add` | 删除文件 |
+| **B** | Untracked + 有内容 | 修改文件 | 用户原内容 | `git add` | 写回 `before` 内容 |
+| **C** | Tracked + Clean (= HEAD) | 修改文件 | HEAD 版本内容 | `git add` | 写回 `before` 内容 |
+| **D** | Tracked + Unstaged 修改 | 修改文件 | 用户 unstaged 内容 | `git add` | 写回 `before` 内容 |
+| **E** | Tracked + Staged 修改 | 修改文件 | 用户 staged 后的 worktree 内容 | `git add` | 写回 `before` 内容 (staging 保持) |
+| **F** | Tracked + Staged + Unstaged | 修改文件 | 用户 worktree 内容 | `git add` | 写回 `before` 内容 (staging 保持) |
+
+### 决策流程图
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Reject 决策流程                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│                    ┌─────────────────┐                              │
+│                    │ 用户点击 Reject │                              │
+│                    └────────┬────────┘                              │
+│                             │                                        │
+│                             ▼                                        │
+│                    ┌─────────────────┐                              │
+│                    │ LocalHistory    │                              │
+│                    │ 创建恢复点标签   │                              │
+│                    └────────┬────────┘                              │
+│                             │                                        │
+│                             ▼                                        │
+│                    ┌─────────────────┐                              │
+│                    │ 获取 DiffEntry  │                              │
+│                    │ diff.before     │                              │
+│                    └────────┬────────┘                              │
+│                             │                                        │
+│                             ▼                                        │
+│               ┌─────────────────────────┐                           │
+│               │ before 为空且未跟踪?    │                           │
+│               └────────────┬────────────┘                           │
+│                    ┌───────┴───────┐                                │
+│                   Yes              No                               │
+│                    │               │                                │
+│                    ▼               ▼                                │
+│        ┌───────────────────────┐  ┌────────────────────────────┐   │
+│        │ 场景 A: 新建未跟踪文件 │  │ 场景 B-F/已跟踪空文件      │   │
+│        │ → 删除文件            │  │ → 写入 before 内容         │   │
+│        └───────────────────────┘  └────────────────────────────┘   │
+│                                                                      │
+│                             │                                        │
+│                             ▼                                        │
+│                    ┌─────────────────┐                              │
+│                    │ 刷新 VFS        │                              │
+│                    │ 移除 Diff 记录  │                              │
+│                    └─────────────────┘                              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 旧策略的问题（已修复）
+
+旧实现使用 `git restore --source=HEAD --staged --worktree` 存在以下问题：
+
+| 问题 | 描述 | 影响 |
+|------|------|------|
+| 丢失用户 unstaged 变更 | `--source=HEAD` 恢复到 HEAD，而非 OpenCode 修改前 | 场景 D, E, F |
+| 丢失用户 untracked 文件 | 对 untracked 文件直接删除，不判断是否有 before 内容 | 场景 B |
+| 破坏 staging 状态 | `--staged` 参数会清除用户已暂存的变更 | 场景 E, F |
+
+### LocalHistory 保护机制
+
+为防止误操作，插件在以下时机创建 LocalHistory 标签：
+
+1. **Reject 操作前**：`"OpenCode: Before rejecting <file>"`
+2. **Accept 操作前**（可选）：`"OpenCode: Before accepting <file>"`
+
+用户可通过 IDE 的 `Local History > Show History` 功能恢复任意历史版本。
 
 ---
 
@@ -131,9 +218,8 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 | SDK 集成 | ✅ | 使用生成的 SDK 替代手写 Client |
 | Diff 展示 | ✅ | 原生多文件 Diff 界面 |
 | Accept 操作 | ✅ | 本地 `git add` 实现 |
-| Reject 操作 | ✅ | 本地 `git restore` / `rm` 实现 |
-| 状态栏上下文 | ✅ | 显示当前选中上下文 |
-| Diff 列表面板 | 🚫 | 已废弃，采用纯 Diff View 体验 |
+| Reject 操作 | ✅ | 使用 `diff.before` 恢复原内容（已修复） |
+| LocalHistory 保护 | ✅ | 破坏性操作前创建恢复点 |
 
 ---
 

@@ -14,7 +14,6 @@ A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the o
 | **Quick Launch** | Open or focus the OpenCode terminal | `Cmd + Esc` | `Ctrl + Esc` |
 | **Add to Terminal** | Send current file/selection or selected files to OpenCode | `Opt + Cmd + K` | `Ctrl + Alt + K` |
 | **Diff Review** | View diffs and accept/reject changes in IDE | — | — |
-| **Context Tracking** | Status bar shows current file/selection context | — | — |
 
 ### Feature Comparison with Claude Code
 
@@ -23,8 +22,7 @@ A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the o
 | Quick Launch | ✅ | ✅ |
 | Diff Viewing | ✅ | ✅ |
 | File Reference Shortcuts | ✅ | ✅ |
-| Selection Context Tracking | ✅ | ✅ |
-| Status Bar Context Widget | ❌ | ✅ |
+| LocalHistory Protection | ❌ | ✅ |
 | Diagnostic Sharing | ✅ | ❌ (uses built-in LSP) |
 
 ### Sidebar Icon
@@ -96,21 +94,11 @@ When OpenCode edits files, the plugin opens a native IDE diff viewer.
 - **Navigation**: Use **← →** arrows to switch files and **↑ ↓** arrows to jump between changes in a file.
 - **Trigger**: The diff viewer opens automatically when OpenCode finishes a response (session idle).
 - **Accept**: Stages the changes locally (`git add`), marking them as reviewed.
-- **Reject**: Discards changes locally (`git restore` for modified files, `rm` for new files). This is a safe local operation.
+- **Reject**: Restores file to its pre-OpenCode state using `diff.before` content. This preserves your unstaged changes and staging state. LocalHistory protection ensures you can always recover.
 - **Auto-advance**: After accepting/rejecting, the plugin automatically opens the next pending diff.
 
 ![Diff Viewer - Accept](images/5.png)
 ![Diff Viewer - Reject](images/6.png)
-
-### 5. Context Tracking (Status Bar)
-
-The status bar can show an **OpenCode icon** that tracks the current file/selection.
-
-- Hover the icon to see the current context (file and optional line range)
-- Click the icon to add the current context to the OpenCode terminal
-- Enable/disable via **Status Bar Widgets** settings (right-click status bar)
-
-Context updates automatically as you navigate and select code.
 
 ## Keyboard Shortcuts
 

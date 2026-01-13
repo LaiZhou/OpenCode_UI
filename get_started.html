@@ -9,7 +9,7 @@
   <li><b>Quick Launch:</b> Instantly create or focus an "OpenCode" terminal session with a single shortcut (Cmd+Esc / Ctrl+Esc). The terminal launches only when you need it.</li>
   <li><b>Context Sharing:</b> Seamlessly send code selections or file references (with line numbers) from your editor or project view directly to the AI agent (Opt+Cmd+K).</li>
   <li><b>Diff Review:</b> Automatically review AI-generated code changes in chronological order using a native multi-file diff viewer.</li>
-  <li><b>Context Tracking:</b> View current file context in the status bar and click to share it instantly.</li>
+  <li><b>LocalHistory Protection:</b> All reject operations create recovery points, so you can always restore accidentally rejected changes.</li>
 </ul>
 
 <br>
@@ -37,7 +37,7 @@
   <li><b>Order:</b> Diffs are presented in the order they were generated (chronological).</li>
   <li><b>Navigation:</b> Use <code>←</code> / <code>→</code> arrows to switch between modified files.</li>
   <li><b>Jump Changes:</b> Use <code>↑</code> / <code>↓</code> to jump between specific changes in the current file.</li>
-  <li><b>Accept/Reject:</b> Use the toolbar buttons. <b>Accept</b> stages the file (git add). <b>Reject</b> reverts the file locally (git restore/rm) with Local History protection.</li>
+  <li><b>Accept/Reject:</b> Use the toolbar buttons. <b>Accept</b> stages the file (git add). <b>Reject</b> restores the file to its pre-OpenCode state with LocalHistory protection.</li>
 </ul>
 
 <h2>Plugin Compatibility</h2>

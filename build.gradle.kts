@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.3"
+version = "1.0.0"
 
 repositories {
     mavenCentral()
@@ -39,7 +39,13 @@ intellijPlatform {
         }
 
         changeNotes = """
-            Initial version
+            <h2>1.0.0</h2>
+            <ul>
+                <li><b>Fixed:</b> Reject now correctly restores files to pre-OpenCode state using diff.before content</li>
+                <li><b>Fixed:</b> User's unstaged and staged changes are preserved when rejecting</li>
+                <li><b>Added:</b> LocalHistory protection before destructive operations</li>
+                <li><b>Removed:</b> Status bar context widget (simplified UI)</li>
+            </ul>
         """.trimIndent()
     }
 }

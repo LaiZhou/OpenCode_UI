@@ -42,12 +42,6 @@
 - 点击图标触发 Quick Launch 行为（聚焦/创建终端）
 - ToolWindow 本身不展示复杂内容：触发后立即隐藏（对齐 Claude 的“点击即跳转”风格）
 
-### 4) Context Tracking（状态栏上下文追踪）
-
-- 状态栏可启用 OpenCode 图标（由 JetBrains “Status Bar Widgets” 统一开关管理）
-- 悬停显示当前上下文（文件与可选行号范围）
-- 点击会把当前上下文插入到 OpenCode 终端（如未启动会自动创建/聚焦终端）
-
 ## 技术实现
 
 ### 架构（核心对象）
@@ -62,8 +56,6 @@ OpenCodeToolWindowFactory              # 右侧栏图标行为
 QuickLaunchAction                      # Cmd+Esc handler
 SendSelectionToTerminalAction           # Opt+Cmd+K handler
 
-SelectionContextService                # 跟踪 active file/selection
-OpenCodeContextWidgetFactory           # 状态栏 Widget
 ```
 
 ### 关键 API
@@ -78,13 +70,12 @@ OpenCodeContextWidgetFactory           # 状态栏 Widget
 ### plugin.xml（关键注册点）
 
 - Actions:
-  - `OpenCode.QuickLaunch`（仅快捷键，不放入 Tools 菜单）
+  - `OpenCode.QuickLaunch`（Tools 菜单 + 快捷键）
   - `OpenCode.AddLines`（EditorPopupMenu）
   - `OpenCode.AddFile`（ProjectViewPopupMenu）
 - Extensions:
   - `toolWindow` id=`OpenCode`
-  - `statusBarWidgetFactory` id=`OpenCodeContext`
-  - `projectService`：`OpenCodeService` / `SelectionContextService`
+  - `projectService`：`OpenCodeService` / `SessionManager` / `DiffViewerService`
 
 ## 项目结构（关键路径）
 
@@ -94,9 +85,6 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 ├── OpenCodeToolWindow.kt
 ├── QuickLaunchAction.kt
 ├── SendSelectionToTerminalAction.kt
-├── context/
-│   ├── SelectionContextService.kt
-│   └── OpenCodeContextWidget.kt
 ├── diff/
 ├── session/
 └── util/
@@ -111,4 +99,3 @@ src/main/resources/META-INF/plugin.xml
 3. Editor 有选区按 `Opt+Cmd+K`：插入 `@current-file#Lx-y`
 4. Project View 选中多个文件/目录按 `Opt+Cmd+K`：插入多个 `@path`
 5. 点击右侧栏 OpenCode 图标：聚焦/创建终端
-6. 启用状态栏 Widget：悬停可见当前上下文，点击可插入上下文到终端

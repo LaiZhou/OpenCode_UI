@@ -13,8 +13,7 @@
     <ul>
         <li><b>Quick Launch:</b> Instantly create or focus the OpenCode terminal with <code>Cmd+Esc</code> / <code>Ctrl+Esc</code>.</li>
         <li><b>Context Sharing:</b> Send current file, selection, or Project View items to the agent with <code>Opt+Cmd+K</code> / <code>Ctrl+Alt+K</code>.</li>
-        <li><b>Native Diff Review:</b> Automatically review AI-generated changes in a multi-file diff viewer. Supports Accept (Stage) and Reject (Undo) directly from the UI.</li>
-        <li><b>Context Tracking:</b> Real-time status bar widget showing the current context being tracked.</li>
+        <li><b>Native Diff Review:</b> Automatically review AI-generated changes in a multi-file diff viewer. Accept stages changes, Reject restores original content with LocalHistory protection.</li>
     </ul>
   ]]></description>
 
@@ -57,15 +56,6 @@
     <projectService serviceImplementation="ai.opencode.ide.jetbrains.OpenCodeService"/>
     <projectService serviceImplementation="ai.opencode.ide.jetbrains.session.SessionManager"/>
     <projectService serviceImplementation="ai.opencode.ide.jetbrains.diff.DiffViewerService"/>
-    <projectService serviceImplementation="ai.opencode.ide.jetbrains.context.SelectionContextService"/>
-
-    <!-- Startup Activity for Selection Context -->
-    <postStartupActivity implementation="ai.opencode.ide.jetbrains.context.SelectionContextStartupActivity"/>
-
-    <!-- Status Bar Widget for Context Display -->
-    <statusBarWidgetFactory id="OpenCodeContext"
-                            implementation="ai.opencode.ide.jetbrains.context.OpenCodeContextWidgetFactory"
-                            order="after encodingWidget"/>
 
     <!-- Notifications -->
     <notificationGroup id="OpenCode" displayType="BALLOON"/>

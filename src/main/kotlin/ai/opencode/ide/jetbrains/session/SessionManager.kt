@@ -127,64 +127,124 @@ class SessionManager(private val project: Project) {
 
     /**
      * Accept a single file diff (git add).
+     * 
+     * Strategy:
+     * - Stage the file using git add
+     * - This is a non-destructive operation (user can unstage later)
+     * - No LocalHistory needed since we're not losing any content
+     * 
+     * @return true if successful, false otherwise
      */
-    fun acceptDiff(filePath: String) {
-        val projectPath = project.basePath ?: return
+    fun acceptDiff(filePath: String): Boolean {
+        val projectPath = project.basePath ?: return false
+        
+        val entry = diffsByFile[filePath]
+        if (entry == null) {
+            logger.warn("No diff entry found for accept: $filePath")
+            return false
+        }
         
         // Execute git add
-        runGitCommand(listOf("add", filePath), projectPath)
+        val success = runGitCommand(listOf("add", filePath), projectPath)
         
-        val entry = diffsByFile.remove(filePath)
-        if (entry != null) {
+        if (success) {
+            diffsByFile.remove(filePath)
             removeFileFromBatches(filePath)
             logger.info("Accepted diff for file: $filePath (git add)")
+        } else {
+            logger.warn("Failed to accept diff for file: $filePath")
         }
+        
         refreshFiles(listOf(filePath))
+        return success
     }
 
 
     /**
-     * Reject a single file diff (git restore or rm).
+     * Reject a single file diff.
+     * 
+     * Strategy:
+     * - Use diff.before content to restore file (NOT git restore to HEAD)
+     * - If before is empty and file is untracked, delete it (new file)
+     * - Tracked empty files are restored to empty content
+     * - If before has content, write it back to restore original state
+     * - This preserves user's unstaged changes and staging state
+     * 
+     * See docs/diff_feature_plan.md for all scenarios.
      */
     fun rejectDiff(filePath: String): Boolean {
         val projectPath = project.basePath ?: return false
-
-        // LocalHistory Protection: Add a label before discarding changes
-        LocalHistory.getInstance().putSystemLabel(project, "OpenCode: Rejecting $filePath")
         
-        // Check if untracked
-        val isUntracked = !runGitCommand(listOf("ls-files", "--error-unmatch", filePath), projectPath)
+        // Get the DiffEntry to access before content
+        val entry = diffsByFile[filePath]
+        if (entry == null) {
+            logger.warn("No diff entry found for file: $filePath")
+            return false
+        }
         
-        val success = if (isUntracked) {
-            // Delete file if it's untracked
-            try {
-                val absPath = toAbsolutePath(filePath)
-                if (absPath != null) {
-                    val file = java.io.File(absPath)
-                    if (file.exists()) file.delete() else true
-                } else false
-            } catch (e: Exception) {
-                logger.warn("Failed to delete file: $filePath", e)
-                false
+        val beforeContent = entry.diff.before
+        val absPath = toAbsolutePath(filePath)
+        if (absPath == null) {
+            logger.warn("Failed to resolve absolute path for: $filePath")
+            return false
+        }
+        
+        val file = java.io.File(absPath)
+        val isTracked = runGitCommand(listOf("ls-files", "--error-unmatch", filePath), projectPath)
+        
+        // LocalHistory Protection: Add label before any destructive operation
+        createLocalHistoryLabel(absPath, "OpenCode: Before rejecting $filePath")
+        
+        val success = try {
+            if (beforeContent.isEmpty() && !isTracked) {
+                // Case A: before is empty and file is untracked = OpenCode created this file -> delete it
+                logger.info("Rejecting new untracked file (before is empty): $filePath")
+                if (file.exists()) file.delete() else true
+            } else {
+                // Case B-F: restore to original content (including tracked empty files)
+                // This only modifies worktree, preserving staging state
+                logger.info("Rejecting modified file (restoring before content): $filePath")
+                file.writeText(beforeContent)
+                true
             }
-        } else {
-            // Git restore for tracked files
-            // Use --source=HEAD --staged --worktree to ensure full revert to HEAD
-            runGitCommand(listOf("restore", "--source=HEAD", "--staged", "--worktree", filePath), projectPath)
+        } catch (e: Exception) {
+            logger.warn("Failed to reject diff for file: $filePath", e)
+            false
         }
 
         if (success) {
-            val entry = diffsByFile.remove(filePath)
-            if (entry != null) {
-                removeFileFromBatches(filePath)
-            }
-            logger.info("Rejected diff for file: $filePath (untracked=$isUntracked)")
+            diffsByFile.remove(filePath)
+            removeFileFromBatches(filePath)
+            logger.info("Successfully rejected diff for file: $filePath (wasNewFile=${beforeContent.isEmpty() && !isTracked})")
         } else {
             logger.warn("Failed to reject diff for file: $filePath")
         }
 
         refreshFiles(listOf(filePath))
         return success
+    }
+    
+    /**
+     * Create a LocalHistory label for a file before destructive operations.
+     * This allows users to recover from accidental rejects.
+     */
+    private fun createLocalHistoryLabel(absolutePath: String, label: String) {
+        try {
+            val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
+            if (virtualFile != null) {
+                val app = ApplicationManager.getApplication()
+                if (app.isDispatchThread) {
+                    LocalHistory.getInstance().putSystemLabel(project, label)
+                } else {
+                    app.invokeAndWait {
+                        LocalHistory.getInstance().putSystemLabel(project, label)
+                    }
+                }
+                logger.debug("Created LocalHistory label: $label")
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to create LocalHistory label: $label", e)
+        }
     }
 
     private fun runGitCommand(args: List<String>, workDir: String): Boolean {

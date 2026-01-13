@@ -48,7 +48,7 @@ private fun openNextDiff(project: com.intellij.openapi.project.Project, previous
 class AcceptFromDiffEditorAction(private val filePath: String) : AnAction() {
     init {
         templatePresentation.text = "Accept"
-        templatePresentation.description = "Accept this change"
+        templatePresentation.description = "Accept this change (git add)"
         templatePresentation.icon = AllIcons.Actions.Checked
     }
 
@@ -59,10 +59,14 @@ class AcceptFromDiffEditorAction(private val filePath: String) : AnAction() {
         val before = sessionManager.getAllDiffEntries()
         val previousIndex = findEntryIndex(before, filePath)
 
-        sessionManager.acceptDiff(filePath)
+        val success = sessionManager.acceptDiff(filePath)
 
         ApplicationManager.getApplication().invokeLater {
-            openNextDiff(project, previousIndex, e)
+            if (success) {
+                openNextDiff(project, previousIndex, e)
+            } else {
+                Messages.showWarningDialog(project, "Failed to stage changes.", "Accept Failed")
+            }
         }
     }
 
@@ -76,7 +80,7 @@ class AcceptFromDiffEditorAction(private val filePath: String) : AnAction() {
 class RejectFromDiffEditorAction(private val filePath: String) : AnAction() {
     init {
         templatePresentation.text = "Reject"
-        templatePresentation.description = "Reject this change"
+        templatePresentation.description = "Reject this change (restore original)"
         templatePresentation.icon = AllIcons.Actions.Rollback
     }
 
@@ -86,7 +90,13 @@ class RejectFromDiffEditorAction(private val filePath: String) : AnAction() {
         val sessionManager = project.service<SessionManager>()
         val entry: DiffEntry = sessionManager.getDiffForFile(filePath) ?: return
 
-        val message = "Reject changes for ${entry.diff.file}?"
+        // Provide more context in the confirmation dialog
+        val isNewFile = entry.diff.before.isEmpty()
+        val message = if (isNewFile) {
+            "Delete new file '${entry.diff.file}'?\n\nThis file was created by OpenCode and will be removed."
+        } else {
+            "Reject changes to '${entry.diff.file}'?\n\nThe file will be restored to its state before OpenCode modified it."
+        }
 
         val confirm = Messages.showYesNoDialog(
             project,
@@ -109,7 +119,11 @@ class RejectFromDiffEditorAction(private val filePath: String) : AnAction() {
 
             override fun onSuccess() {
                 if (!ok) {
-                    Messages.showWarningDialog(project, "Failed to revert changes.", "Reject Failed")
+                    Messages.showWarningDialog(
+                        project, 
+                        "Failed to restore file. Check Local History for recovery options.", 
+                        "Reject Failed"
+                    )
                     return
                 }
 
