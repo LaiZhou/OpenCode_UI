@@ -2,7 +2,7 @@
 <idea-plugin>
   <id>ai.opencode.ide.jetbrains</id>
   <name>OpenCode UI</name>
-  <vendor email="hhlai1990@gmail.com" url="https://opencode.ai">JesseZ</vendor>
+  <vendor email="hhlai1990@gmail.com" url="https://github.com/LaiZhou/OpenCode_UI">LaiZhou</vendor>
 
   <description><![CDATA[
     <b>OpenCode UI - AI Coding Agent for JetBrains IDEs</b><br><br>
