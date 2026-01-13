@@ -56,6 +56,10 @@ tasks {
         sourceCompatibility = "17"
         targetCompatibility = "17"
     }
+
+    withType<org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask> {
+        systemProperty("ide.no.platform.update", "true")
+    }
 }
 
 kotlin {
