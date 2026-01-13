@@ -1,5 +1,6 @@
 package ai.opencode.ide.jetbrains.util
 
+import com.intellij.openapi.diagnostic.Logger
 import java.io.IOException
 import java.net.Proxy
 import java.net.ServerSocket
@@ -13,6 +14,7 @@ import java.net.ServerSocket
  * - No scanning for existing servers - each project gets its own server instance
  */
 object PortFinder {
+    private val logger = Logger.getInstance(PortFinder::class.java)
     private const val START_PORT = 4096
     private const val MAX_ATTEMPTS = 100
     private const val CONNECT_TIMEOUT_MS = 2000
@@ -20,14 +22,28 @@ object PortFinder {
 
     /**
      * Finds an available port starting from START_PORT.
+     * Checks both that the port is not bound AND that no OpenCode server is running on it.
      * @return An available port number
      * @throws IOException if no available port is found within MAX_ATTEMPTS
      */
     fun findAvailablePort(): Int {
+        logger.info("Searching for available port starting from $START_PORT")
         for (port in START_PORT until START_PORT + MAX_ATTEMPTS) {
-            if (isPortAvailable(port)) {
-                return port
+            val portAvailable = isPortAvailable(port)
+            val openCodeRunning = isOpenCodeRunningOnPort(port)
+            
+            if (!portAvailable) {
+                logger.debug("Port $port is not available (already bound)")
+                continue
             }
+            
+            if (openCodeRunning) {
+                logger.debug("Port $port has OpenCode server already running")
+                continue
+            }
+            
+            logger.info("Found available port: $port")
+            return port
         }
         throw IOException("No available port found in range $START_PORT-${START_PORT + MAX_ATTEMPTS - 1}")
     }
@@ -62,5 +78,18 @@ object PortFinder {
         } catch (e: Exception) {
             false
         }
+    }
+
+    /**
+     * Scans for a running OpenCode server in the port range.
+     * @return The port number if a running server is found, null otherwise
+     */
+    fun findRunningOpenCodeServer(): Int? {
+        for (port in START_PORT until START_PORT + MAX_ATTEMPTS) {
+            if (isOpenCodeRunningOnPort(port)) {
+                return port
+            }
+        }
+        return null
     }
 }

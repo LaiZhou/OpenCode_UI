@@ -71,7 +71,28 @@ class OpenCodeService(private val project: Project) : Disposable {
         if (existingContent != null) {
             contentManager.setSelectedContent(existingContent)
             toolWindow.activate(null)
-            startConnectionManager()
+            
+            if (port == null) {
+                AppExecutorUtil.getAppExecutorService().submit {
+                    try {
+                        val runningPort = PortFinder.findRunningOpenCodeServer()
+                        if (runningPort != null) {
+                            port = runningPort
+                            logger.info("Found running OpenCode server on port: $runningPort")
+                            ApplicationManager.getApplication().invokeLater {
+                                initializeApiClient(runningPort)
+                                startConnectionManager()
+                            }
+                        } else {
+                            logger.warn("Existing OpenCode terminal found but no running server detected")
+                        }
+                    } catch (e: Exception) {
+                        logger.error("Failed to detect running OpenCode server", e)
+                    }
+                }
+            } else {
+                startConnectionManager()
+            }
         } else {
             AppExecutorUtil.getAppExecutorService().submit {
                 try {
