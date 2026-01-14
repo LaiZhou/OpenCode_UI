@@ -8,8 +8,7 @@
 <ul>
   <li><b>Quick Launch:</b> Instantly create or focus an "OpenCode" terminal session with a single shortcut (Cmd+Esc / Ctrl+Esc). The terminal launches only when you need it.</li>
   <li><b>Context Sharing:</b> Seamlessly send code selections or file references (with line numbers) from your editor or project view directly to the AI agent (Opt+Cmd+K).</li>
-  <li><b>Diff Review:</b> Automatically review AI-generated code changes in chronological order using a native multi-file diff viewer.</li>
-  <li><b>LocalHistory Protection:</b> All reject operations create recovery points, so you can always restore accidentally rejected changes.</li>
+  <li><b>Diff Review:</b> Automatically review AI-generated code changes in chronological order using a native multi-file diff viewer. Accept stages changes, Reject restores original content.</li>
 </ul>
 
 <br>
@@ -40,14 +39,7 @@
   <li><b>Accept:</b> Stages the file (<code>git add</code>), marking it as reviewed.</li>
   <li><b>Reject:</b> Restores the file to its pre-OpenCode state using <code>diff.before</code> content. Preserves your unstaged changes and staging state.</li>
 </ul>
-
-<h2>LocalHistory Protection</h2>
-<ul>
-  <li><b>Automatic Snapshots:</b> When OpenCode finishes modifying files, an <code>"OpenCode"</code> label is created in LocalHistory.</li>
-  <li><b>Before Reject:</b> A labeled snapshot is created before restoring original content.</li>
-  <li><b>Recovery:</b> Right-click any file → <b>Local History</b> → <b>Show History</b> to view all OpenCode-related changes and restore any version.</li>
-</ul>
-<p><i>Note: Accept doesn't create a LocalHistory label since <code>git add</code> doesn't change file content.</i></p>
+<p><i>The plugin automatically creates snapshots in your IDE's Local History for safety.</i></p>
 
 <h2>Plugin Compatibility</h2>
 <p>

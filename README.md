@@ -22,7 +22,6 @@ A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the o
 | Quick Launch | ✅ | ✅ |
 | Diff Viewing | ✅ | ✅ |
 | File Reference Shortcuts | ✅ | ✅ |
-| LocalHistory Protection | ❌ | ✅ |
 | Diagnostic Sharing | ✅ | ❌ (uses built-in LSP) |
 
 ### Sidebar Icon
@@ -100,15 +99,7 @@ When OpenCode edits files, the plugin opens a native IDE diff viewer.
 ![Diff Viewer - Accept](images/5.png)
 ![Diff Viewer - Reject](images/6.png)
 
-### 5. LocalHistory Protection
-
-The plugin automatically creates LocalHistory snapshots to protect your work:
-
-- **Session Completion**: When OpenCode finishes modifying files, an `"OpenCode"` label is created in LocalHistory.
-- **Before Reject**: A labeled snapshot is created before restoring the original content.
-- **Recovery**: Use **Right-click file → Local History → Show History** to view all OpenCode-related changes and restore any version.
-
-Note: Accept doesn't create a LocalHistory label since `git add` doesn't change file content.
+> **Safety**: The plugin automatically creates snapshots in your IDE's Local History, so you can always recover previous versions if needed.
 
 ## Keyboard Shortcuts
 
