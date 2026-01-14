@@ -301,6 +301,9 @@ class OpenCodeService(private val project: Project) : Disposable {
                 logger.info("SSE connected")
                 updateConnectionState(true)
                 sessionManager.refreshActiveSession()
+                
+                // Initialize diff baseline to prevent pre-existing untracked files from showing up in the first round
+                sessionManager.initializeBaseline()
             },
             onDisconnected = {
                 logger.debug("SSE disconnected")
@@ -321,9 +324,10 @@ class OpenCodeService(private val project: Project) : Disposable {
         logger.debug("Received SSE event: ${event.type}")
         when (event) {
             is SessionDiffEvent -> {
+                // Just log; actual diff processing happens on session.idle
+                // This avoids duplicate/unfiltered diffs being added
                 val diffBatch = event.properties.toDiffBatch()
-                logger.debug("Received ${diffBatch.diffs.size} diffs via SSE")
-                sessionManager.onDiffReceived(diffBatch)
+                logger.debug("SSE: ${diffBatch.diffs.size} diffs reported (will process on idle)")
             }
             is SessionStatusEvent -> {
                 logger.debug("Session status: ${event.properties.status.type}")
@@ -390,11 +394,27 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun processDiffs(sessionId: String, diffs: List<FileDiff>) {
-        val entries = diffs.map { DiffEntry(sessionId, null, null, it, System.currentTimeMillis()) }
-        sessionManager.onDiffReceived(DiffBatch(sessionId, null, diffs))
+        logger.info("[Diff Process] Starting: session=$sessionId, server returned ${diffs.size} diffs")
+        
+        // Clear old diffs to ensure we only show the current round of changes
+        sessionManager.clearDiffs()
+        
+        // Filter out diffs that haven't changed (Implicit Accept)
+        val newDiffs = sessionManager.filterNewDiffs(diffs)
+        sessionManager.updateProcessedDiffs(diffs) // Always update state with latest
+        
+        if (newDiffs.isEmpty()) {
+            logger.info("[Diff Process] No new diffs to show (all filtered as duplicates/implicit accepts)")
+            return
+        }
+        
+        logger.info("[Diff Process] Showing ${newDiffs.size} new diffs: ${newDiffs.map { it.file }}")
+        
+        val entries = newDiffs.map { DiffEntry(sessionId, null, null, it, System.currentTimeMillis()) }
+        sessionManager.onDiffReceived(DiffBatch(sessionId, null, newDiffs))
         
         // Create LocalHistory label for this session
-        sessionManager.onSessionCompleted(sessionId, diffs.size)
+        sessionManager.onSessionCompleted(sessionId, newDiffs.size)
 
         ApplicationManager.getApplication().invokeLater {
             if (!project.isDisposed) diffViewerService.showMultiFileDiff(entries)
@@ -421,7 +441,10 @@ class OpenCodeService(private val project: Project) : Disposable {
             toolWindow.contentManager.getContent(it.component) == openCodeContent 
         } as? ShellTerminalWidget ?: return false
 
-        widget.ttyConnector?.let { tty -> text.forEach { tty.write(it.toString()) } }
+        widget.ttyConnector?.let { tty ->
+            // Use bulk write instead of character-by-character to prevent cursor jumping issues
+            tty.write(text)
+        }
         toolWindow.contentManager.setSelectedContent(openCodeContent)
         toolWindow.activate(null)
         return true

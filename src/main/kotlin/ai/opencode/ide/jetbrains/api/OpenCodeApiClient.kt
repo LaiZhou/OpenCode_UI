@@ -42,6 +42,7 @@ class OpenCodeApiClient(
 
     private val gson: Gson = GsonBuilder()
         .registerTypeAdapter(OpenCodeEvent::class.java, OpenCodeEventDeserializer())
+        .registerTypeAdapter(FileDiff::class.java, FileDiffDeserializer())
         .create()
 
     fun getSessions(directory: String): List<Session> {
@@ -131,7 +132,10 @@ class OpenCodeApiClient(
         return try {
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    gson.fromJson(response.body?.string(), type)
+                    // 强制使用 UTF-8 解码，避免服务端未设置 charset 导致中文乱码或内容丢失
+                    val bodyBytes = response.body?.bytes()
+                    val jsonString = bodyBytes?.toString(Charsets.UTF_8)
+                    gson.fromJson(jsonString, type)
                 } else {
                     logger.warn("[OpenCode] Request failed: ${request.url} (HTTP ${response.code})")
                     null
@@ -147,7 +151,10 @@ class OpenCodeApiClient(
         return try {
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    gson.fromJson(response.body?.string(), clazz)
+                    // 强制使用 UTF-8 解码，避免服务端未设置 charset 导致中文乱码或内容丢失
+                    val bodyBytes = response.body?.bytes()
+                    val jsonString = bodyBytes?.toString(Charsets.UTF_8)
+                    gson.fromJson(jsonString, clazz)
                 } else {
                     logger.warn("[OpenCode] Request failed: ${request.url} (HTTP ${response.code})")
                     null

@@ -67,7 +67,8 @@
 #### 2. Diff 展示
 - 使用 JetBrains 原生 `DiffManager`。
 - 支持多文件链式展示（`SimpleDiffRequestChain`），用户可使用快捷键导航。
-- 默认聚焦最后一个修改的文件。
+- 默认聚焦第一个修改的文件（按时间顺序）。
+- **每轮独立展示**：新消息产生 diff 时，清除旧的 diff 缓存，只展示当前轮次的变更（对标 Claude Code）。未处理的旧 diff 视为"隐式接受"，用户可通过 LocalHistory 或 Git 回滚。
 
 #### 3. Accept (接受变更)
 - **操作**: 用户点击 "Accept"。
@@ -194,6 +195,7 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 │   └── models/                     # 辅助模型
 │       ├── Events.kt               # SSE 事件模型
 │       ├── DiffEntry.kt            # Diff 业务实体
+│       ├── FileDiff.kt             # Diff 数据模型 + Go %q 格式解码器
 │       └── Session.kt              # SessionStatus 模型（兼容性保留）
 │
 ├── diff/                           # Diff UI
@@ -229,6 +231,33 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 | Accept 操作 | ✅ | 本地 `git add` 实现 |
 | Reject 操作 | ✅ | 使用 `diff.before` 恢复原内容（已修复） |
 | LocalHistory 保护 | ✅ | 破坏性操作前创建恢复点 |
+| 中文文件名支持 | ✅ | 解码服务端 Go `%q` 格式 + 磁盘回退（已修复） |
+| 每轮 Diff 独立展示 | ✅ | 对标 Claude Code，新消息只展示当前轮次变更 |
+
+---
+
+## 已知问题与 Workaround
+
+### 服务端中文文件名 Bug（已在插件侧 Workaround）
+
+**问题描述**：OpenCode 服务端（Go 语言实现）对包含非 ASCII 字符（如中文）的文件存在问题：
+
+1. **文件名编码**：使用 Go 的 `%q` 格式化，导致 JSON 中文件名变成八进制转义，如：
+   ```json
+   {"file": "\"\\344\\270\\255\\346\\226\\207.md\"", "after": "", "additions": 15}
+   ```
+
+2. **内容丢失**：中文文件名的文件，`before`/`after` 字段返回空字符串，尽管 `additions > 0`
+
+**插件侧 Workaround**：
+
+| 组件 | 解决方案 |
+|------|---------|
+| `FileDiffDeserializer` | 解码 Go `%q` 八进制转义序列（`\xxx`）为 UTF-8 字符 |
+| `OpenCodeApiClient` | 强制使用 UTF-8 解码 HTTP 响应体，避免 charset 缺失导致乱码 |
+| `DiffViewerService.resolveAfterContent()` | 当 `after` 为空但 `additions > 0` 时，从磁盘读取文件内容作为回退 |
+
+**建议**：服务端应修复此问题，确保 JSON 输出使用标准 UTF-8 编码，不使用 `%q` 格式化非 ASCII 字符。
 
 ---
 

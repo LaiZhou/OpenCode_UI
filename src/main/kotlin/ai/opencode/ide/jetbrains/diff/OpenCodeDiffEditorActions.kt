@@ -22,27 +22,34 @@ private fun findEntryIndex(entries: List<DiffEntry>, filePath: String): Int {
 private fun closeCurrentDiffIfPossible(e: AnActionEvent) {
     val project = e.project ?: return
 
-    val virtualFile = e.getData(CommonDataKeys.VIRTUAL_FILE)
-    if (virtualFile != null && virtualFile.javaClass.name.endsWith(".DiffVirtualFile")) {
-        FileEditorManager.getInstance(project).closeFile(virtualFile)
-        return
-    }
-
+    // 尝试获取当前的 VirtualFile（Diff 视图通常是一个虚拟文件）
+    val virtualFile = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
+    
+    // 只要文件存在，就尝试关闭它。DiffVirtualFile 通常是临时的。
+    // 如果是在普通编辑器里（不太可能，因为 Action 只在 Diff 上下文显示），关闭也是合理的。
+    FileEditorManager.getInstance(project).closeFile(virtualFile)
 }
 
 private fun openNextDiff(project: com.intellij.openapi.project.Project, previousIndex: Int, closeEvent: AnActionEvent?) {
+    // 1. 无论是否还有剩余，都先关闭当前窗口
+    if (closeEvent != null) {
+        closeCurrentDiffIfPossible(closeEvent)
+    }
+
     val sessionManager = project.service<SessionManager>()
     val remaining = sessionManager.getAllDiffEntries()
 
     if (remaining.isEmpty()) {
-        if (closeEvent != null) closeCurrentDiffIfPossible(closeEvent)
         return
     }
 
+    // 2. 还有剩余 Diff，打开新的 Diff 窗口
     val nextIndex = previousIndex.coerceIn(0, remaining.lastIndex)
-    project.service<DiffViewerService>().showMultiFileDiff(remaining, nextIndex)
-
-    if (closeEvent != null) closeCurrentDiffIfPossible(closeEvent)
+    
+    // 使用 invokeLater 确保关闭操作完成后再打开新窗口，体验更流畅
+    ApplicationManager.getApplication().invokeLater {
+        project.service<DiffViewerService>().showMultiFileDiff(remaining, nextIndex)
+    }
 }
 
 class AcceptFromDiffEditorAction(private val filePath: String) : AnAction() {

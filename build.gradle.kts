@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.1"
+version = "1.0.2"
 
 repositories {
     mavenCentral()
@@ -39,12 +39,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.1</h2>
+            <h2>1.0.2</h2>
             <ul>
-                <li><b>Added:</b> Connect to existing OpenCode server with automatic authentication support (e.g., OpenCode Desktop)</li>
-                <li><b>Added:</b> Connection dialog for custom host:port configuration</li>
-                <li><b>Added:</b> Cross-platform authentication detection (macOS, Linux, Windows)</li>
-                <li><b>Fixed:</b> LocalHistory protection before destructive operations</li>
+                <li>Fixed: Empty diff content and encoding issues for files with Chinese names.</li>
+                <li>Fixed: Cursor jumping unpredictably when pasting text to terminal.</li>
+                <li>Fixed: Duplicate untracked files in diff list and optimized implicit accept workflow.</li>
             </ul>
         """.trimIndent()
     }

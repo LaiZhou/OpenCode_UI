@@ -44,6 +44,9 @@ class SessionManager(private val project: Project) {
     // Key: sessionId, Value: list of DiffBatch from that session
     private val diffBatchesBySession = ConcurrentHashMap<String, MutableList<DiffBatch>>()
 
+    // Track processed diff contents to filter out duplicates in subsequent rounds (Implicit Accept)
+    // Key: FilePath, Value: AfterContent
+    private val processedDiffs = ConcurrentHashMap<String, String>()
 
 
     /**
@@ -108,6 +111,66 @@ class SessionManager(private val project: Project) {
     }
 
     /**
+     * Filter out diffs that have not changed since the last round.
+     * This implements "Implicit Accept": if a file was shown before and its content hasn't changed,
+     * we don't show it again, even if the server returns it (because it's still modified relative to HEAD).
+     */
+    fun filterNewDiffs(diffs: List<FileDiff>): List<FileDiff> {
+        logger.info("[Diff Filter] Server returned ${diffs.size} diffs, checking for duplicates...")
+        
+        val result = diffs.filter { diff ->
+            val lastContent = processedDiffs[diff.file]
+            val isFirstTime = lastContent == null
+            
+            // Resolve effective 'after' content (handle server bug where chinese file content is empty)
+            val effectiveAfter = resolveEffectiveContent(diff)
+            
+            val contentChanged = lastContent != effectiveAfter
+            val isNew = isFirstTime || contentChanged
+            
+            if (!isNew) {
+                logger.info("[Diff Filter] SKIP: ${diff.file} (content unchanged, implicit accept)")
+            } else if (isFirstTime) {
+                logger.info("[Diff Filter] NEW: ${diff.file} (first time seeing this file)")
+            } else {
+                logger.info("[Diff Filter] CHANGED: ${diff.file} (content differs from last time)")
+            }
+            isNew
+        }
+        
+        logger.info("[Diff Filter] Result: ${result.size} new diffs out of ${diffs.size} total")
+        return result
+    }
+
+    /**
+     * Update the record of processed diffs.
+     * Should be called after filtering and processing.
+     */
+    fun updateProcessedDiffs(diffs: List<FileDiff>) {
+        diffs.forEach { diff ->
+            val content = resolveEffectiveContent(diff)
+            processedDiffs[diff.file] = content
+            logger.info("[Diff State] Updated: ${diff.file} (after.length=${content.length})")
+        }
+    }
+    
+    private fun resolveEffectiveContent(diff: FileDiff): String {
+        // If after is empty but additions > 0, it's likely the server bug for non-ASCII filenames
+        if (diff.after.isEmpty() && diff.additions > 0) {
+            val absPath = toAbsolutePath(diff.file)
+            if (absPath != null) {
+                try {
+                    val file = java.io.File(absPath)
+                    if (file.exists() && file.isFile) {
+                        return file.readText()
+                    }
+                } catch (_: Exception) { }
+            }
+        }
+        return diff.after
+    }
+
+    /**
      * Handle session status change.
      */
     fun onSessionStatusChanged(sessionId: String, status: SessionStatusType) {
@@ -125,7 +188,8 @@ class SessionManager(private val project: Project) {
     fun getAllDiffEntries(): List<DiffEntry> {
         return diffsByFile.values
             .toList()
-            .sortedWith(compareByDescending<DiffEntry> { it.timestamp }.thenBy { it.diff.file })
+            // Sort by timestamp ASCENDING to match the AI generation order (replay thought process)
+            .sortedWith(compareBy<DiffEntry> { it.timestamp }.thenBy { it.diff.file })
     }
 
     /**
@@ -267,12 +331,71 @@ class SessionManager(private val project: Project) {
             
             val handler = OSProcessHandler(commandLine)
             val process = handler.process
-            // handler.startNotify() // Optional if we just want to wait
             process.waitFor()
             return process.exitValue() == 0
         } catch (e: Exception) {
             logger.warn("Git command failed: git ${args.joinToString(" ")}", e)
             return false
+        }
+    }
+
+    private fun runGitCommandAndGetOutput(args: List<String>, workDir: String): List<String> {
+        return try {
+            val commandLine = GeneralCommandLine()
+                .withExePath("git")
+                .withWorkDirectory(workDir)
+                .withParameters(args)
+            
+            val handler = OSProcessHandler(commandLine)
+            val output = handler.process.inputStream.bufferedReader().readLines()
+            handler.process.waitFor()
+            if (handler.process.exitValue() == 0) output else emptyList()
+        } catch (e: Exception) {
+            logger.warn("Git command failed (output): git ${args.joinToString(" ")}", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Initialize the baseline of processed diffs.
+     * This scans current untracked/modified files and records their content.
+     * This prevents the plugin from showing existing changes as "New Diffs" in the first round.
+     */
+    fun initializeBaseline() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val projectPath = project.basePath ?: return@executeOnPooledThread
+            logger.info("Initializing diff baseline...")
+            
+            // 1. Get untracked files
+            val untracked = runGitCommandAndGetOutput(listOf("ls-files", "--others", "--exclude-standard"), projectPath)
+            
+            // 2. Get modified files (unstaged)
+            val modified = runGitCommandAndGetOutput(listOf("diff", "--name-only"), projectPath)
+            
+            // 3. Get staged files
+            val staged = runGitCommandAndGetOutput(listOf("diff", "--name-only", "--cached"), projectPath)
+            
+            val allFiles = (untracked + modified + staged).distinct()
+            
+            var count = 0
+            allFiles.forEach { filePath ->
+                if (filePath.isNotBlank()) {
+                    val absPath = toAbsolutePath(filePath)
+                    if (absPath != null) {
+                        try {
+                            val file = java.io.File(absPath)
+                            if (file.exists() && file.isFile) {
+                                // Record current content as "processed"
+                                processedDiffs[filePath] = file.readText()
+                                count++
+                            }
+                        } catch (e: Exception) {
+                            logger.warn("Failed to read baseline file: $filePath")
+                        }
+                    }
+                }
+            }
+            logger.info("Initialized diff baseline: $count files recorded")
         }
     }
 
@@ -388,11 +511,21 @@ class SessionManager(private val project: Project) {
     // ========== Cleanup ==========
 
     /**
+     * Clear diff caches only, keeping session state.
+     * Called before processing new diffs to ensure each round only shows current changes.
+     * Unprocessed old diffs are treated as "implicitly accepted" (files already modified).
+     */
+    fun clearDiffs() {
+        diffsByFile.clear()
+        diffBatchesBySession.clear()
+    }
+
+    /**
      * Clear all cached state.
      */
     fun clear() {
-        diffsByFile.clear()
-        diffBatchesBySession.clear()
+        clearDiffs()
+        processedDiffs.clear()
         activeSessionId = null
     }
 }
