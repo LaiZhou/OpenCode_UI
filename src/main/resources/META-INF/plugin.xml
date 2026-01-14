@@ -11,7 +11,7 @@
     
     <b>Key Features:</b><br>
     <ul>
-        <li><b>Quick Launch:</b> Instantly create or focus the OpenCode terminal with <code>Cmd+Esc</code> / <code>Ctrl+Esc</code>.</li>
+        <li><b>Quick Launch:</b> Connect to existing OpenCode server (e.g., OpenCode Desktop) or create new terminal with <code>Cmd+Esc</code> / <code>Ctrl+Esc</code>. Supports automatic authentication.</li>
         <li><b>Context Sharing:</b> Send current file, selection, or Project View items to the agent with <code>Opt+Cmd+K</code> / <code>Ctrl+Alt+K</code>.</li>
         <li><b>Native Diff Review:</b> Review AI-generated changes in a multi-file diff viewer. Accept stages changes (<code>git add</code>), Reject restores original content. Automatic snapshots ensure you can always recover previous versions.</li>
     </ul>

@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.0"
+version = "1.0.1"
 
 repositories {
     mavenCentral()
@@ -39,12 +39,12 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.0</h2>
+            <h2>1.0.1</h2>
             <ul>
-                <li><b>Fixed:</b> Reject now correctly restores files to pre-OpenCode state using diff.before content</li>
-                <li><b>Fixed:</b> User's unstaged and staged changes are preserved when rejecting</li>
-                <li><b>Added:</b> LocalHistory protection before destructive operations</li>
-                <li><b>Removed:</b> Status bar context widget (simplified UI)</li>
+                <li><b>Added:</b> Connect to existing OpenCode server with automatic authentication support (e.g., OpenCode Desktop)</li>
+                <li><b>Added:</b> Connection dialog for custom host:port configuration</li>
+                <li><b>Added:</b> Cross-platform authentication detection (macOS, Linux, Windows)</li>
+                <li><b>Fixed:</b> LocalHistory protection before destructive operations</li>
             </ul>
         """.trimIndent()
     }

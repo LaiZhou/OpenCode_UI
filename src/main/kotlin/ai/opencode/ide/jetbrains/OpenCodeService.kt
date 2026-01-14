@@ -5,7 +5,10 @@ import ai.opencode.ide.jetbrains.api.SseEventListener
 import ai.opencode.ide.jetbrains.api.models.*
 import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.session.SessionManager
+import ai.opencode.ide.jetbrains.ui.OpenCodeConnectDialog
 import ai.opencode.ide.jetbrains.util.PortFinder
+import ai.opencode.ide.jetbrains.util.ProcessAuthDetector
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.notification.NotificationGroupManager
@@ -17,6 +20,8 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.ui.content.ContentManagerEvent
+import com.intellij.ui.content.ContentManagerListener
 import com.intellij.util.concurrency.AppExecutorUtil
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
 import org.jetbrains.plugins.terminal.TerminalView
@@ -39,7 +44,10 @@ class OpenCodeService(private val project: Project) : Disposable {
         private const val CONNECTION_RETRY_INTERVAL_MS = 5000L
     }
 
+    private var hostname: String = "0.0.0.0"
     private var port: Int? = null
+    private var username: String? = null
+    private var password: String? = null
     private var apiClient: OpenCodeApiClient? = null
     private var sseListener: SseEventListener? = null
 
@@ -47,6 +55,10 @@ class OpenCodeService(private val project: Project) : Disposable {
     private val isConnecting = AtomicBoolean(false)
     private val connectionListeners = CopyOnWriteArrayList<(Boolean) -> Unit>()
     private var connectionManagerTask: ScheduledFuture<*>? = null
+    
+    init {
+        setupTerminalCloseListener()
+    }
 
     fun getPort(): Int? = port
     fun getApiClient(): OpenCodeApiClient? = apiClient
@@ -57,6 +69,25 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     private val diffViewerService: DiffViewerService
         get() = project.service()
+
+    private fun setupTerminalCloseListener() {
+        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return
+        toolWindow.contentManager.addContentManagerListener(object : ContentManagerListener {
+            override fun contentRemoved(event: ContentManagerEvent) {
+                if (event.content.displayName == OPEN_CODE_TAB_NAME) {
+                    logger.info("OpenCode terminal closed, resetting connection state")
+                    port = null
+                    hostname = "0.0.0.0"
+                    username = null
+                    password = null
+                    connectionManagerTask?.cancel(true)
+                    sseListener?.disconnect()
+                    apiClient = null
+                    isConnected.set(false)
+                }
+            }
+        })
+    }
 
     fun hasOpenCodeTerminal(): Boolean {
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return false
@@ -79,6 +110,11 @@ class OpenCodeService(private val project: Project) : Disposable {
                         if (runningPort != null) {
                             port = runningPort
                             logger.info("Found running OpenCode server on port: $runningPort")
+                            
+                            val auth = ProcessAuthDetector.detectAuthForPort(runningPort)
+                            username = auth.username
+                            password = auth.password
+                            
                             ApplicationManager.getApplication().invokeLater {
                                 initializeApiClient(runningPort)
                                 startConnectionManager()
@@ -94,23 +130,94 @@ class OpenCodeService(private val project: Project) : Disposable {
                 startConnectionManager()
             }
         } else {
-            AppExecutorUtil.getAppExecutorService().submit {
-                try {
-                    val foundPort = PortFinder.findAvailablePort()
-                    port = foundPort
-                    logger.info("OpenCode selected port: $foundPort")
+            showConnectDialogAndCreateTerminal()
+        }
+    }
 
-                    ApplicationManager.getApplication().invokeLater {
-                        createTerminalAndConnect(foundPort)
+    private fun showConnectDialogAndCreateTerminal() {
+        AppExecutorUtil.getAppExecutorService().submit {
+            try {
+                val defaultPort = PortFinder.findAvailablePort()
+                logger.info("Default available port: $defaultPort")
+
+                ApplicationManager.getApplication().invokeLater {
+                    val result = OpenCodeConnectDialog.show(project, defaultPort)
+                    if (result != null) {
+                        val (userHostname, userPort) = result
+                        hostname = userHostname
+                        port = userPort
+                        
+                        val isLocalhost = userHostname in listOf("0.0.0.0", "127.0.0.1", "localhost")
+                        val isDefaultPort = userPort == defaultPort
+                        
+                        if (isLocalhost && isDefaultPort) {
+                            logger.info("Using default local address, creating terminal: $hostname:$port")
+                            createTerminalAndConnect(userHostname, userPort)
+                        } else {
+                            logger.info("Custom address specified, connecting to existing server: $hostname:$port")
+                            connectToExistingServer(userPort)
+                        }
                     }
-                } catch (e: Exception) {
-                    logger.error("Failed to find available port", e)
+                }
+            } catch (e: Exception) {
+                logger.error("Failed to find available port", e)
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showErrorDialog(
+                        project,
+                        "Failed to find available port: ${e.message}",
+                        "OpenCode Connection Error"
+                    )
                 }
             }
         }
     }
 
-    private fun createTerminalAndConnect(foundPort: Int) {
+    private fun connectToExistingServer(port: Int) {
+        AppExecutorUtil.getAppExecutorService().submit {
+            try {
+                val projectPath = project.basePath ?: return@submit
+                
+                val auth = ProcessAuthDetector.detectAuthForPort(port)
+                username = auth.username
+                password = auth.password
+                
+                if (PortFinder.isOpenCodeRunningOnPort(port, hostname, username, password)) {
+                    logger.info("OpenCode server found on $hostname:$port, starting connection manager")
+                    ApplicationManager.getApplication().invokeLater {
+                        initializeApiClient(port)
+                        startConnectionManager()
+                        
+                        // Show success notification
+                        Messages.showInfoMessage(
+                            project,
+                            "Successfully connected to OpenCode server at $hostname:$port",
+                            "OpenCode Connection Success"
+                        )
+                    }
+                } else {
+                    logger.warn("No OpenCode server running on $hostname:$port")
+                    ApplicationManager.getApplication().invokeLater {
+                        Messages.showErrorDialog(
+                            project,
+                            "Cannot connect to OpenCode server on $hostname:$port. Please ensure the server is running.",
+                            "OpenCode Connection Error"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                logger.error("Failed to connect to existing server", e)
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showErrorDialog(
+                        project,
+                        "Failed to connect to server: ${e.message}",
+                        "OpenCode Connection Error"
+                    )
+                }
+            }
+        }
+    }
+
+    private fun createTerminalAndConnect(hostname: String, port: Int) {
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return
         val terminalView = TerminalView.getInstance(project)
         val contentManager = toolWindow.contentManager
@@ -120,20 +227,24 @@ class OpenCodeService(private val project: Project) : Disposable {
         newContent?.displayName = OPEN_CODE_TAB_NAME
         newContent?.let { contentManager.setSelectedContent(it) }
 
-        val command = "opencode --hostname 0.0.0.0 --port $foundPort"
+        val command = "opencode --hostname $hostname --port $port"
         widget.executeCommand(command)
         toolWindow.activate(null)
 
-        initializeApiClient(foundPort)
+        initializeApiClient(port)
         startConnectionManager()
     }
 
     private fun initializeApiClient(port: Int) {
         this.port = port
-        val client = OpenCodeApiClient(port)
+        val client = OpenCodeApiClient(hostname, port, username, password)
         apiClient = client
         sessionManager.setApiClient(client)
-        logger.info("API client initialized on port $port")
+        if (password != null) {
+            logger.info("API client initialized on $hostname:$port with authentication")
+        } else {
+            logger.info("API client initialized on $hostname:$port")
+        }
     }
 
     @Synchronized

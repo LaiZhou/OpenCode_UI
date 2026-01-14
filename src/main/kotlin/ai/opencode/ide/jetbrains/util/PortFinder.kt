@@ -62,15 +62,27 @@ object PortFinder {
     /**
      * Checks if OpenCode server is running and healthy on the specified port.
      * Uses Proxy.NO_PROXY to bypass system proxy settings.
+     * Supports HTTP Basic Authentication if credentials are provided.
      */
-    fun isOpenCodeRunningOnPort(port: Int): Boolean {
+    fun isOpenCodeRunningOnPort(
+        port: Int, 
+        hostname: String = "127.0.0.1",
+        username: String? = null,
+        password: String? = null
+    ): Boolean {
         return try {
-            val url = java.net.URL("http://127.0.0.1:$port/global/health")
+            val url = java.net.URL("http://$hostname:$port/global/health")
             val connection = url.openConnection(Proxy.NO_PROXY) as java.net.HttpURLConnection
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
             connection.requestMethod = "GET"
             connection.instanceFollowRedirects = false
+            
+            if (username != null && password != null) {
+                val credentials = "$username:$password"
+                val encodedCredentials = java.util.Base64.getEncoder().encodeToString(credentials.toByteArray())
+                connection.setRequestProperty("Authorization", "Basic $encodedCredentials")
+            }
             
             val responseCode = connection.responseCode
             connection.disconnect()

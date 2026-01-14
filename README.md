@@ -11,7 +11,7 @@ A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the o
 
 | Feature | Description | Shortcut (Mac) | Shortcut (Win/Linux) |
 |---------|-------------|----------------|----------------------|
-| **Quick Launch** | Open or focus the OpenCode terminal | `Cmd + Esc` | `Ctrl + Esc` |
+| **Quick Launch** | Connect to existing OpenCode server or create new terminal | `Cmd + Esc` | `Ctrl + Esc` |
 | **Add to Terminal** | Send current file/selection or selected files to OpenCode | `Opt + Cmd + K` | `Ctrl + Alt + K` |
 | **Diff Review** | View diffs and accept/reject changes in IDE | — | — |
 
@@ -56,7 +56,10 @@ Click the **OpenCode** icon in the right sidebar to instantly focus or create an
 
 ### 1. Launch OpenCode Terminal
 
-Press `Cmd+Esc` (Mac) or `Ctrl+Esc` (Win/Linux) to open the OpenCode terminal. If no OpenCode session exists, a new terminal tab named "OpenCode" will be created and the `opencode` command will be executed automatically.
+Press `Cmd+Esc` (Mac) or `Ctrl+Esc` (Win/Linux) to open the connection dialog. You can:
+
+- **Connect to existing server**: Enter `host:port` (e.g., `127.0.0.1:58052`) to connect to OpenCode Desktop or any running OpenCode server. Authentication is detected automatically.
+- **Create new terminal**: Use default `127.0.0.1:4096` to create a local OpenCode terminal session.
 
 ![Step 1: Launch OpenCode](images/1.png)
 

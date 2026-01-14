@@ -13,16 +13,31 @@ import java.util.concurrent.TimeUnit
 /**
  * HTTP client for OpenCode Server API.
  */
-class OpenCodeApiClient(private val port: Int) {
+class OpenCodeApiClient(
+    private val hostname: String, 
+    private val port: Int,
+    private val username: String? = null,
+    private val password: String? = null
+) {
 
     private val logger = Logger.getInstance(OpenCodeApiClient::class.java)
-    private val baseUrl = "http://127.0.0.1:$port"
+    private val baseUrl = "http://$hostname:$port"
 
     private val client = OkHttpClient.Builder()
         .proxy(java.net.Proxy.NO_PROXY)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .apply {
+            if (username != null && password != null) {
+                addInterceptor { chain ->
+                    val request = chain.request().newBuilder()
+                        .header("Authorization", Credentials.basic(username, password))
+                        .build()
+                    chain.proceed(request)
+                }
+            }
+        }
         .build()
 
     private val gson: Gson = GsonBuilder()
@@ -78,7 +93,7 @@ class OpenCodeApiClient(private val port: Int) {
         onConnected: () -> Unit = {},
         onDisconnected: () -> Unit = {}
     ): SseEventListener {
-        return SseEventListener(baseUrl, directory, onEvent, onError, onConnected, onDisconnected)
+        return SseEventListener(baseUrl, directory, onEvent, onError, onConnected, onDisconnected, username, password)
     }
 
     private fun encode(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")

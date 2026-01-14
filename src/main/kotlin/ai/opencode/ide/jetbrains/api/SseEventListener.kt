@@ -20,7 +20,9 @@ class SseEventListener(
     private val onEvent: (OpenCodeEvent) -> Unit,
     private val onError: (Throwable) -> Unit,
     private val onConnected: () -> Unit = {},
-    private val onDisconnected: () -> Unit = {}
+    private val onDisconnected: () -> Unit = {},
+    private val username: String? = null,
+    private val password: String? = null
 ) {
     private val logger = Logger.getInstance(SseEventListener::class.java)
 
@@ -32,6 +34,16 @@ class SseEventListener(
         .proxy(java.net.Proxy.NO_PROXY)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
+        .apply {
+            if (username != null && password != null) {
+                addInterceptor { chain ->
+                    val request = chain.request().newBuilder()
+                        .header("Authorization", Credentials.basic(username, password))
+                        .build()
+                    chain.proceed(request)
+                }
+            }
+        }
         .build()
 
     private val gson = GsonBuilder()

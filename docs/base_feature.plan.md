@@ -18,9 +18,9 @@
 | Windows/Linux | `Ctrl + Esc` |
 
 **行为：**
-- 查找名为 `OpenCode` 的 Terminal tab
-- 若存在：聚焦该 tab，并激活 Terminal Tool Window
-- 若不存在：创建新 tab（命名为 `OpenCode`），执行 `opencode --hostname 0.0.0.0 --port <auto>`（端口自动探测；如已存在 server 则使用 `opencode --port <port>`）
+- 显示连接对话框，允许用户输入自定义 `host:port`（默认 `127.0.0.1:4096`）
+- **连接到已有 server**：检测并连接到 OpenCode Desktop 或其他已运行的 OpenCode server（支持自动 HTTP Basic Authentication）
+- **创建新 terminal**：若 hostname 为 localhost 且端口为默认值，则创建 `OpenCode` terminal tab 并启动本地 server
 - IDE 启动时不会自动创建终端，只有用户显式触发才会启动
 
 ### 2) Add Context to Terminal（添加上下文到终端）
@@ -48,13 +48,21 @@
 
 ```
 OpenCodeService (Project-scoped)
-├── focusOrCreateTerminal()            # 终端生命周期
+├── focusOrCreateTerminal()            # 显示连接对话框，连接或创建终端
+├── connectToExistingServer()          # 连接到已有 OpenCode server（支持自动认证）
+├── createTerminalAndConnect()         # 创建本地 terminal 并启动 server
 ├── pasteToTerminal()                  # 粘贴到已存在终端
 └── focusOrCreateTerminalAndPaste()    # 统一 UX：可自动创建并重试粘贴
 
+OpenCodeConnectDialog                  # 连接对话框（输入 host:port）
+ProcessAuthDetector                    # 自动检测 OpenCode Desktop 认证信息
+OpenCodeApiClient                      # HTTP API 客户端（支持 Basic Auth）
+SseEventListener                       # SSE 事件监听（支持 Basic Auth）
+PortFinder                             # 端口检测和健康检查（支持 Basic Auth）
+
 OpenCodeToolWindowFactory              # 右侧栏图标行为
 QuickLaunchAction                      # Cmd+Esc handler
-SendSelectionToTerminalAction           # Opt+Cmd+K handler
+SendSelectionToTerminalAction          # Opt+Cmd+K handler
 
 ```
 
