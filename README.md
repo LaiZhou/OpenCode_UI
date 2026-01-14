@@ -5,8 +5,6 @@
 
 A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the open-source AI coding agent — directly into your development workflow.
 
-**Author**: hhlai1990@gmail.com
-
 ## Features
 
 | Feature | Description | Shortcut (Mac) | Shortcut (Win/Linux) |
@@ -40,17 +38,9 @@ Click the **OpenCode** icon in the right sidebar to instantly focus or create an
 
 ## Installation
 
-### From JetBrains Marketplace (Recommended)
+**Plugin URL**: https://plugins.jetbrains.com/plugin/29744-opencode-ui
 
-1. Open **Settings** → **Plugins** → **Marketplace**
-2. Search for "OpenCode"
-3. Click **Install**
-
-### Manual Installation
-
-1. Download the plugin ZIP from [Releases](https://github.com/anomalyco/opencode/releases)
-2. Open **Settings** → **Plugins** → ⚙️ → **Install Plugin from Disk...**
-3. Select the downloaded ZIP file
+Open **Settings** → **Plugins** → **Marketplace** → Search "OpenCode" → **Install**
 
 ## Usage
 
