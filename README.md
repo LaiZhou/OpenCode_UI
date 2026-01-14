@@ -90,15 +90,25 @@ Click the OpenCode icon in the right sidebar to quickly focus or create the Open
 
 When OpenCode edits files, the plugin opens a native IDE diff viewer.
 
-- **Chronological View**: Automatically shows changes in the order they were made by OpenCode (replay thought process), starting from the first modified file.
-- **Navigation**: Use **← →** arrows to switch files and **↑ ↓** arrows to jump between changes in a file.
+- **Chronological View**: Changes are shown in the order they were made, starting from the first modified file.
+- **Navigation**: Use **← →** arrows to switch files and **↑ ↓** arrows to jump between changes.
 - **Trigger**: The diff viewer opens automatically when OpenCode finishes a response (session idle).
-- **Accept**: Stages the changes locally (`git add`), marking them as reviewed.
-- **Reject**: Restores file to its pre-OpenCode state using `diff.before` content. This preserves your unstaged changes and staging state. LocalHistory protection ensures you can always recover.
-- **Auto-advance**: After accepting/rejecting, the plugin automatically opens the next pending diff.
+- **Accept**: Stages the file (`git add`), marking it as reviewed.
+- **Reject**: Restores file to its pre-OpenCode state using `diff.before` content. Preserves your unstaged changes and staging state.
+- **Auto-advance**: After accepting/rejecting, automatically opens the next pending diff.
 
 ![Diff Viewer - Accept](images/5.png)
 ![Diff Viewer - Reject](images/6.png)
+
+### 5. LocalHistory Protection
+
+The plugin automatically creates LocalHistory snapshots to protect your work:
+
+- **Session Completion**: When OpenCode finishes modifying files, an `"OpenCode"` label is created in LocalHistory.
+- **Before Reject**: A labeled snapshot is created before restoring the original content.
+- **Recovery**: Use **Right-click file → Local History → Show History** to view all OpenCode-related changes and restore any version.
+
+Note: Accept doesn't create a LocalHistory label since `git add` doesn't change file content.
 
 ## Keyboard Shortcuts
 

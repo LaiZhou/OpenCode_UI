@@ -45,6 +45,7 @@ class SessionManager(private val project: Project) {
     private val diffBatchesBySession = ConcurrentHashMap<String, MutableList<DiffBatch>>()
 
 
+
     /**
      * Set the API client for server operations.
      */
@@ -65,9 +66,21 @@ class SessionManager(private val project: Project) {
     /**
      * Handle file edited event.
      * Refreshes the file in the IDE virtual file system.
+     * Note: LocalHistory label is created at session.idle, not per-file edit.
      */
     fun onFileEdited(filePath: String) {
         refreshFiles(listOf(filePath))
+    }
+
+    /**
+     * Create a LocalHistory snapshot for a completed OpenCode session.
+     * Called when session becomes idle (AI finished one conversation turn).
+     */
+    fun onSessionCompleted(sessionId: String, fileCount: Int) {
+        if (fileCount > 0) {
+            createLocalHistoryLabel("OpenCode")
+            logger.info("Created LocalHistory label: OpenCode (modified $fileCount files)")
+        }
     }
 
     // ========== Diff Management ==========
@@ -131,7 +144,7 @@ class SessionManager(private val project: Project) {
      * Strategy:
      * - Stage the file using git add
      * - This is a non-destructive operation (user can unstage later)
-     * - No LocalHistory needed since we're not losing any content
+     * - No LocalHistory needed since file content doesn't change
      * 
      * @return true if successful, false otherwise
      */
@@ -144,7 +157,7 @@ class SessionManager(private val project: Project) {
             return false
         }
         
-        // Execute git add
+        // Execute git add (no LocalHistory needed - file content doesn't change)
         val success = runGitCommand(listOf("add", filePath), projectPath)
         
         if (success) {
@@ -193,7 +206,7 @@ class SessionManager(private val project: Project) {
         val isTracked = runGitCommand(listOf("ls-files", "--error-unmatch", filePath), projectPath)
         
         // LocalHistory Protection: Add label before any destructive operation
-        createLocalHistoryLabel(absPath, "OpenCode: Before rejecting $filePath")
+        createLocalHistoryLabel("OpenCode: Before rejecting $filePath")
         
         val success = try {
             if (beforeContent.isEmpty() && !isTracked) {
@@ -225,23 +238,21 @@ class SessionManager(private val project: Project) {
     }
     
     /**
-     * Create a LocalHistory label for a file before destructive operations.
-     * This allows users to recover from accidental rejects.
+     * Create a project-level LocalHistory label.
+     * Note: IntelliJ Platform only supports project-level labels, not file-level labels.
+     * This allows users to recover from file modifications or destructive operations.
      */
-    private fun createLocalHistoryLabel(absolutePath: String, label: String) {
+    private fun createLocalHistoryLabel(label: String) {
         try {
-            val virtualFile = LocalFileSystem.getInstance().findFileByPath(absolutePath)
-            if (virtualFile != null) {
-                val app = ApplicationManager.getApplication()
-                if (app.isDispatchThread) {
+            val app = ApplicationManager.getApplication()
+            if (app.isDispatchThread) {
+                LocalHistory.getInstance().putSystemLabel(project, label)
+            } else {
+                app.invokeAndWait {
                     LocalHistory.getInstance().putSystemLabel(project, label)
-                } else {
-                    app.invokeAndWait {
-                        LocalHistory.getInstance().putSystemLabel(project, label)
-                    }
                 }
-                logger.debug("Created LocalHistory label: $label")
             }
+            logger.debug("Created LocalHistory label: $label")
         } catch (e: Exception) {
             logger.warn("Failed to create LocalHistory label: $label", e)
         }

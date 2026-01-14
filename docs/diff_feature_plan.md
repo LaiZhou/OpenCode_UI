@@ -161,12 +161,21 @@
 
 ### LocalHistory 保护机制
 
-为防止误操作，插件在以下时机创建 LocalHistory 标签：
+为防止误操作并完整追踪所有 OpenCode 产生的变更，插件在以下时机创建 LocalHistory 标签：
 
-1. **Reject 操作前**：`"OpenCode: Before rejecting <file>"`
-2. **Accept 操作前**（可选）：`"OpenCode: Before accepting <file>"`
+1. **Session 完成时**：`"OpenCode"`
+   - 时机：收到 SSE `session.idle` 事件，AI 完成一轮对话后
+   - 目的：为整个会话创建一个快照，便于回滚整个 OpenCode 操作
 
-用户可通过 IDE 的 `Local History > Show History` 功能恢复任意历史版本。
+2. **Reject 操作前**：`"OpenCode: Before rejecting <file>"`
+   - 时机：用户点击 Reject 按钮，执行恢复操作前
+   - 目的：保护当前状态，防止误操作导致数据丢失
+
+**注**：Accept 操作不创建 LocalHistory 标签，因为 `git add` 不改变文件内容，用户可通过 `git restore --staged` 撤销
+
+用户可通过 IDE 的 `Local History > Show History` 功能恢复任意历史版本，所有带 "OpenCode" 前缀的标签都表示来自 OpenCode 插件的操作。
+
+**注意**：IntelliJ Platform 只支持项目级别的 LocalHistory 标签，不支持文件级别的标签。
 
 ---
 

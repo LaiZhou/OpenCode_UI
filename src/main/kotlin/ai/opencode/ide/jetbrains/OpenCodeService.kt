@@ -281,6 +281,9 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun processDiffs(sessionId: String, diffs: List<FileDiff>) {
         val entries = diffs.map { DiffEntry(sessionId, null, null, it, System.currentTimeMillis()) }
         sessionManager.onDiffReceived(DiffBatch(sessionId, null, diffs))
+        
+        // Create LocalHistory label for this session
+        sessionManager.onSessionCompleted(sessionId, diffs.size)
 
         ApplicationManager.getApplication().invokeLater {
             if (!project.isDisposed) diffViewerService.showMultiFileDiff(entries)

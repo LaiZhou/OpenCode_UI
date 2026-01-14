@@ -37,8 +37,17 @@
   <li><b>Order:</b> Diffs are presented in the order they were generated (chronological).</li>
   <li><b>Navigation:</b> Use <code>←</code> / <code>→</code> arrows to switch between modified files.</li>
   <li><b>Jump Changes:</b> Use <code>↑</code> / <code>↓</code> to jump between specific changes in the current file.</li>
-  <li><b>Accept/Reject:</b> Use the toolbar buttons. <b>Accept</b> stages the file (git add). <b>Reject</b> restores the file to its pre-OpenCode state with LocalHistory protection.</li>
+  <li><b>Accept:</b> Stages the file (<code>git add</code>), marking it as reviewed.</li>
+  <li><b>Reject:</b> Restores the file to its pre-OpenCode state using <code>diff.before</code> content. Preserves your unstaged changes and staging state.</li>
 </ul>
+
+<h2>LocalHistory Protection</h2>
+<ul>
+  <li><b>Automatic Snapshots:</b> When OpenCode finishes modifying files, an <code>"OpenCode"</code> label is created in LocalHistory.</li>
+  <li><b>Before Reject:</b> A labeled snapshot is created before restoring original content.</li>
+  <li><b>Recovery:</b> Right-click any file → <b>Local History</b> → <b>Show History</b> to view all OpenCode-related changes and restore any version.</li>
+</ul>
+<p><i>Note: Accept doesn't create a LocalHistory label since <code>git add</code> doesn't change file content.</i></p>
 
 <h2>Plugin Compatibility</h2>
 <p>
