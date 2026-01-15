@@ -20,7 +20,7 @@
 **行为：**
 - 显示连接对话框，允许用户输入自定义 `host:port`（默认 `127.0.0.1:4096`）
 - **连接到已有 server**：检测并连接到 OpenCode Desktop 或其他已运行的 OpenCode server（支持自动 HTTP Basic Authentication）
-- **创建新 terminal**：若 hostname 为 localhost 且端口为默认值，则创建 `OpenCode` terminal tab 并启动本地 server
+- **创建新 terminal**：若 hostname 为 localhost 且端口为默认值，则在 **Editor 区域**创建 `OpenCode` terminal tab 并启动本地 server（占用更大空间，便于 TUI 显示）
 - IDE 启动时不会自动创建终端，只有用户显式触发才会启动
 
 ### 2) Add Context to Terminal（添加上下文到终端）
@@ -50,9 +50,13 @@
 OpenCodeService (Project-scoped)
 ├── focusOrCreateTerminal()            # 显示连接对话框，连接或创建终端
 ├── connectToExistingServer()          # 连接到已有 OpenCode server（支持自动认证）
-├── createTerminalAndConnect()         # 创建本地 terminal 并启动 server
+├── createTerminalAndConnect()         # 在 Editor 区域创建 terminal tab 并启动 server
 ├── pasteToTerminal()                  # 粘贴到已存在终端
 └── focusOrCreateTerminalAndPaste()    # 统一 UX：可自动创建并重试粘贴
+
+OpenCodeTerminalVirtualFile            # 虚拟文件，代表 Editor 中的 terminal tab
+OpenCodeTerminalFileEditor             # FileEditor 实现，包装 terminal widget
+OpenCodeTerminalFileEditorProvider     # FileEditorProvider，管理 terminal editor 创建
 
 OpenCodeConnectDialog                  # 连接对话框（输入 host:port）
 ProcessAuthDetector                    # 自动检测 OpenCode Desktop 认证信息
@@ -68,11 +72,12 @@ SendSelectionToTerminalAction          # Opt+Cmd+K handler
 
 ### 关键 API
 
-- `TerminalToolWindowManager.getInstance(project)` - Terminal 管理
-- `TerminalToolWindowManager.createLocalShellWidget()` - 创建 Terminal tab
+- `TerminalView.createLocalShellWidget()` - 创建 Terminal widget
 - `ShellTerminalWidget.executeCommand()` - 执行命令
 - `TtyConnector.write()` - 向终端注入文本
-- `ToolWindowManager` / `ToolWindowManagerListener` - ToolWindow 生命周期
+- `FileEditorManager` - 管理 Editor 区域的文件/tab
+- `FileEditorProvider` - 自定义 Editor 类型（用于 terminal tab）
+- `FileEditorManagerListener` - 监听 Editor tab 关闭事件
 - `Alarm` - 防抖/调度（避免自建线程池）
 
 ### plugin.xml（关键注册点）
@@ -95,6 +100,10 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 ├── SendSelectionToTerminalAction.kt
 ├── diff/
 ├── session/
+├── terminal/
+│   ├── OpenCodeTerminalVirtualFile.kt
+│   ├── OpenCodeTerminalFileEditor.kt
+│   └── OpenCodeTerminalFileEditorProvider.kt
 └── util/
 
 src/main/resources/META-INF/plugin.xml
@@ -102,8 +111,9 @@ src/main/resources/META-INF/plugin.xml
 
 ## 验证用例
 
-1. 按 `Cmd+Esc` / `Ctrl+Esc`：创建或聚焦 `OpenCode` 终端
+1. 按 `Cmd+Esc` / `Ctrl+Esc`：在 Editor 区域创建或聚焦 `OpenCode` 终端 tab
 2. Editor 无选区按 `Opt+Cmd+K`：插入 `@current-file`
 3. Editor 有选区按 `Opt+Cmd+K`：插入 `@current-file#Lx-y`
 4. Project View 选中多个文件/目录按 `Opt+Cmd+K`：插入多个 `@path`
-5. 点击右侧栏 OpenCode 图标：聚焦/创建终端
+5. 点击右侧栏 OpenCode 图标：在 Editor 区域聚焦/创建终端
+6. 关闭 OpenCode terminal tab：自动清理连接状态

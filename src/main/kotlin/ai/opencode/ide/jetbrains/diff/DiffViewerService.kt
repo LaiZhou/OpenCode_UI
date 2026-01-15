@@ -8,6 +8,7 @@ import com.intellij.diff.DiffManager
 import com.intellij.diff.chains.SimpleDiffRequestChain
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.diff.util.DiffUserDataKeys
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -27,7 +28,7 @@ import com.intellij.openapi.application.ApplicationManager
  * Service for showing diffs using JetBrains native DiffManager.
  */
 @Service(Service.Level.PROJECT)
-class DiffViewerService(private val project: Project) {
+class DiffViewerService(private val project: Project) : Disposable {
 
     private val logger = Logger.getInstance(DiffViewerService::class.java)
     
@@ -84,11 +85,11 @@ class DiffViewerService(private val project: Project) {
             val fileType = FileTypeManager.getInstance()
                 .getFileTypeByFileName(entry.diff.file)
             
-            // 简化标题：只显示文件名，去掉 "(1 of N)" 这种让人困惑的计数
-            // Diff 窗口自带导航，用户只需专注当前文件
+            // Simplified title: only show filename, remove confusing "(1 of N)" counter
+            // Diff window has built-in navigation, user only needs to focus on current file
             val title = entry.diff.file
 
-            // 获取 diff 内容，如果 after 为空则从磁盘读取（服务端对中文文件名可能返回空内容）
+            // Get diff content, fallback to disk read if server returns empty (e.g. for non-ASCII filenames)
             val beforeText = entry.diff.before
             val afterText = resolveAfterContent(entry)
 
@@ -113,8 +114,8 @@ class DiffViewerService(private val project: Project) {
             chain.index = targetIndex
         }
 
-        // 2. Capture the newly opened diff file
-        val connection = project.messageBus.connect()
+        // 2. Capture the newly opened diff file (use short-lived connection that auto-disconnects)
+        val connection = project.messageBus.connect(this)
         connection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
             override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
                 // Heuristic: The file opened immediately after showDiff is likely our diff window
@@ -153,17 +154,18 @@ class DiffViewerService(private val project: Project) {
     }
 
     /**
-     * 获取 diff 的 after 内容。     * 如果服务端返回为空但 additions > 0（服务端 Bug），则从磁盘读取文件内容作为回退。
+     * Get diff after content.
+     * If server returns empty but additions > 0 (server bug), fallback to reading from disk.
      */
     private fun resolveAfterContent(entry: DiffEntry): String {
         val afterText = entry.diff.after
         
-        // 如果 after 有内容，直接返回
+        // If after has content, return directly
         if (afterText.isNotEmpty()) {
             return afterText
         }
         
-        // 如果 after 为空但 additions > 0，说明服务端没有正确返回内容，尝试从磁盘读取
+        // If after is empty but additions > 0, server didn't return content correctly, try loading from disk
         if (entry.diff.additions > 0) {
             logger.info("[OpenCode] Server returned empty 'after' for ${entry.diff.file} (additions=${entry.diff.additions}), loading from disk")
             val absolutePath = resolveAbsolutePath(entry.diff.file)
@@ -185,7 +187,7 @@ class DiffViewerService(private val project: Project) {
     }
 
     /**
-     * 将相对路径转换为绝对路径。
+     * Convert relative path to absolute path.
      */
     private fun resolveAbsolutePath(filePath: String): String? {
         val raw = filePath.trim()
@@ -212,5 +214,11 @@ class DiffViewerService(private val project: Project) {
         )
 
         request.putUserData(DiffUserDataKeys.CONTEXT_ACTIONS, actions)
+    }
+
+    override fun dispose() {
+        logger.debug("Disposing DiffViewerService")
+        // Close any open diff windows
+        closeLastOpenedDiff()
     }
 }

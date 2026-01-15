@@ -3,6 +3,7 @@
   <id>ai.opencode.ide.jetbrains</id>
   <name>OpenCode UI</name>
   <vendor email="hhlai1990@gmail.com" url="https://github.com/LaiZhou/OpenCode_UI">laizhou</vendor>
+  
 
   <description><![CDATA[
     <b>OpenCode UI - AI Coding Agent for JetBrains IDEs</b><br><br>
@@ -58,6 +59,9 @@
     <projectService serviceImplementation="ai.opencode.ide.jetbrains.OpenCodeService"/>
     <projectService serviceImplementation="ai.opencode.ide.jetbrains.session.SessionManager"/>
     <projectService serviceImplementation="ai.opencode.ide.jetbrains.diff.DiffViewerService"/>
+
+    <!-- File Editor Provider -->
+    <fileEditorProvider implementation="ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditorProvider"/>
 
     <!-- Notifications -->
     <notificationGroup id="OpenCode" displayType="BALLOON"/>

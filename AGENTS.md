@@ -61,6 +61,15 @@ Always use the provided Gradle wrapper (`./gradlew`) in the root directory.
 ## 3. Code Style & Conventions
 Follow the official [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html) and [IntelliJ Platform SDK Guidelines](https://plugins.jetbrains.com/docs/intellij/intro.html).
 
+### Language & Comments Policy
+- **Source Code Language**: All source code MUST be in English
+- **Comments & Documentation**: All comments, documentation, and user-facing strings MUST be in English
+- **No Non-English Content**: Do not include Chinese, Japanese, or any other non-English text in source files
+- **Exception**: Non-English content is only allowed in:
+  - User-facing messages that are explicitly localized
+  - Documentation files specifically targeting non-English audiences
+  - Test data that requires non-English characters for testing purposes
+
 ### Formatting
 - **Indentation**: 4 spaces (no tabs).
 - **Line Length**: 120 characters preferred.
@@ -92,6 +101,10 @@ src/main/kotlin/
     ├── OpenCodeService.kt          # Main plugin logic (Service)
     ├── actions/                    # AnAction implementations
     ├── listeners/                  # IDE Event Listeners
+    ├── terminal/                   # Terminal editor components
+    │   ├── OpenCodeTerminalVirtualFile.kt    # Virtual file for terminal tab
+    │   ├── OpenCodeTerminalFileEditor.kt     # FileEditor wrapper for terminal
+    │   └── OpenCodeTerminalFileEditorProvider.kt  # Provider for terminal editors
     └── util/                       # Utility classes (PortFinder, etc.)
 ```
 
@@ -111,6 +124,30 @@ src/main/kotlin/
 - **Http Clients**: Use `OkHttp` for external API calls.
 - **Proxy**: Use `Proxy.NO_PROXY` for local server connections (localhost/127.0.0.1) to avoid corporate proxy issues.
 - **Timeouts**: Always set connection and read timeouts (default ~2000ms for local checks).
+
+### Dynamic Plugin Development
+Dynamic plugin loading allows hot reload without IDE restart. Key requirements:
+
+- **Services Must Implement Disposable**: All `@Service` classes MUST implement `Disposable` interface
+  ```kotlin
+  @Service(Service.Level.PROJECT)
+  class MyService(private val project: Project) : Disposable {
+      override fun dispose() {
+          // Clean up resources, cancel tasks, clear caches
+      }
+  }
+  ```
+- **MessageBus Connections**: Always connect to a disposable parent to ensure cleanup
+  ```kotlin
+  // Correct - connects to service disposable
+  project.messageBus.connect(this).subscribe(...)
+  
+  // Wrong - creates orphaned connection
+  project.messageBus.connect().subscribe(...)
+  ```
+- **Memory Management**: Use `WeakHashMap` for caches to prevent memory leaks during hot reload
+- **Resource Cleanup**: Cancel scheduled tasks, close connections, unregister listeners in `dispose()`
+- **Extension Points**: Some extension points (like `toolWindow`, `fileEditorProvider`) work with dynamic loading if properly implemented
 
 ### Logging
 - Use the platform logger:

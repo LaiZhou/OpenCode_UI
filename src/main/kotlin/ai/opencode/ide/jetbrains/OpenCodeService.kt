@@ -5,6 +5,9 @@ import ai.opencode.ide.jetbrains.api.SseEventListener
 import ai.opencode.ide.jetbrains.api.models.*
 import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.session.SessionManager
+import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditor
+import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditorProvider
+import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalVirtualFile
 import ai.opencode.ide.jetbrains.ui.OpenCodeConnectDialog
 import ai.opencode.ide.jetbrains.util.PortFinder
 import ai.opencode.ide.jetbrains.util.ProcessAuthDetector
@@ -18,7 +21,10 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.ContentManagerEvent
 import com.intellij.ui.content.ContentManagerListener
@@ -39,7 +45,6 @@ class OpenCodeService(private val project: Project) : Disposable {
     private val logger = Logger.getInstance(OpenCodeService::class.java)
 
     companion object {
-        private const val TERMINAL_TOOLWINDOW_ID = "Terminal"
         private const val OPEN_CODE_TAB_NAME = "OpenCode"
         private const val CONNECTION_RETRY_INTERVAL_MS = 5000L
     }
@@ -55,6 +60,8 @@ class OpenCodeService(private val project: Project) : Disposable {
     private val isConnecting = AtomicBoolean(false)
     private val connectionListeners = CopyOnWriteArrayList<(Boolean) -> Unit>()
     private var connectionManagerTask: ScheduledFuture<*>? = null
+    private var terminalVirtualFile: OpenCodeTerminalVirtualFile? = null
+    private var terminalEditor: OpenCodeTerminalFileEditor? = null
     
     init {
         setupTerminalCloseListener()
@@ -71,10 +78,9 @@ class OpenCodeService(private val project: Project) : Disposable {
         get() = project.service()
 
     private fun setupTerminalCloseListener() {
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return
-        toolWindow.contentManager.addContentManagerListener(object : ContentManagerListener {
-            override fun contentRemoved(event: ContentManagerEvent) {
-                if (event.content.displayName == OPEN_CODE_TAB_NAME) {
+        project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+            override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                if (file is OpenCodeTerminalVirtualFile && file == terminalVirtualFile) {
                     logger.info("OpenCode terminal closed, resetting connection state")
                     port = null
                     hostname = "0.0.0.0"
@@ -84,24 +90,26 @@ class OpenCodeService(private val project: Project) : Disposable {
                     sseListener?.disconnect()
                     apiClient = null
                     isConnected.set(false)
+                    
+                    OpenCodeTerminalFileEditorProvider.unregisterWidget(file)
+                    terminalVirtualFile = null
+                    terminalEditor = null
                 }
             }
         })
     }
 
     fun hasOpenCodeTerminal(): Boolean {
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return false
-        return toolWindow.contentManager.contents.any { it.displayName == OPEN_CODE_TAB_NAME }
+        val fileEditorManager = FileEditorManager.getInstance(project)
+        return fileEditorManager.openFiles.any { it is OpenCodeTerminalVirtualFile }
     }
 
     fun focusOrCreateTerminal() {
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return
-        val contentManager = toolWindow.contentManager
-        val existingContent = contentManager.contents.find { it.displayName == OPEN_CODE_TAB_NAME }
+        val fileEditorManager = FileEditorManager.getInstance(project)
+        val existingFile = terminalVirtualFile
 
-        if (existingContent != null) {
-            contentManager.setSelectedContent(existingContent)
-            toolWindow.activate(null)
+        if (existingFile != null && fileEditorManager.openFiles.contains(existingFile)) {
+            fileEditorManager.openFile(existingFile, true)
             
             if (port == null) {
                 AppExecutorUtil.getAppExecutorService().submit {
@@ -218,21 +226,43 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun createTerminalAndConnect(hostname: String, port: Int) {
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return
         val terminalView = TerminalView.getInstance(project)
-        val contentManager = toolWindow.contentManager
-
         val widget = terminalView.createLocalShellWidget(project.basePath, OPEN_CODE_TAB_NAME)
-        val newContent = contentManager.contents.lastOrNull()
-        newContent?.displayName = OPEN_CODE_TAB_NAME
-        newContent?.let { contentManager.setSelectedContent(it) }
 
-        val command = "opencode --hostname $hostname --port $port"
-        widget.executeCommand(command)
-        toolWindow.activate(null)
+        val virtualFile = OpenCodeTerminalVirtualFile(OPEN_CODE_TAB_NAME)
+        
+        terminalVirtualFile = virtualFile
+        
+        // Register widget before opening file
+        OpenCodeTerminalFileEditorProvider.registerWidget(virtualFile, widget)
 
-        initializeApiClient(port)
-        startConnectionManager()
+        val fileEditorManager = FileEditorManager.getInstance(project)
+        val editors = fileEditorManager.openFile(virtualFile, true)
+        
+        // Improved error handling
+        terminalEditor = editors.firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
+        
+        if (terminalEditor == null) {
+            logger.error("Failed to create OpenCode terminal editor")
+            OpenCodeTerminalFileEditorProvider.unregisterWidget(virtualFile)
+            terminalVirtualFile = null
+            ApplicationManager.getApplication().invokeLater {
+                Messages.showErrorDialog(
+                    project,
+                    "Failed to create OpenCode terminal. Please try again.",
+                    "OpenCode Terminal Error"
+                )
+            }
+            return
+        }
+        
+        ApplicationManager.getApplication().invokeLater {
+            val command = "opencode --hostname $hostname --port $port"
+            widget.executeCommand(command)
+
+            initializeApiClient(port)
+            startConnectionManager()
+        }
     }
 
     private fun initializeApiClient(port: Int) {
@@ -432,21 +462,17 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     fun pasteToTerminal(text: String): Boolean {
         if (text.isBlank()) return false
-        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOLWINDOW_ID) ?: return false
-        val terminalView = TerminalView.getInstance(project)
-        val contentManager = toolWindow.contentManager
-        val openCodeContent = toolWindow.contentManager.contents.find { it.displayName == OPEN_CODE_TAB_NAME } ?: return false
-
-        val widget = terminalView.getWidgets().firstOrNull { 
-            toolWindow.contentManager.getContent(it.component) == openCodeContent 
-        } as? ShellTerminalWidget ?: return false
+        
+        val editor = terminalEditor ?: return false
+        val virtualFile = terminalVirtualFile ?: return false
+        val widget = editor.terminalWidget
 
         widget.ttyConnector?.let { tty ->
-            // Use bulk write instead of character-by-character to prevent cursor jumping issues
             tty.write(text)
         }
-        toolWindow.contentManager.setSelectedContent(openCodeContent)
-        toolWindow.activate(null)
+        
+        val fileEditorManager = FileEditorManager.getInstance(project)
+        fileEditorManager.openFile(virtualFile, true)
         return true
     }
 
@@ -468,9 +494,17 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     override fun dispose() {
+        logger.debug("Disposing OpenCodeService")
         connectionManagerTask?.cancel(true)
         sseListener?.disconnect()
         connectionListeners.clear()
         isConnected.set(false)
+        
+        terminalVirtualFile?.let { OpenCodeTerminalFileEditorProvider.unregisterWidget(it) }
+        terminalVirtualFile = null
+        terminalEditor = null
+        
+        // Clear static map for dynamic plugin unloading support
+        OpenCodeTerminalFileEditorProvider.clearAll()
     }
 }

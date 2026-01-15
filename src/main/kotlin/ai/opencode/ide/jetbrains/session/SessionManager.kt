@@ -5,6 +5,7 @@ import ai.opencode.ide.jetbrains.api.models.*
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.history.LocalHistory
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
@@ -23,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - Maintain mapping between files and their diff context
  */
 @Service(Service.Level.PROJECT)
-class SessionManager(private val project: Project) {
+class SessionManager(private val project: Project) : Disposable {
 
     private val logger = Logger.getInstance(SessionManager::class.java)
 
@@ -527,5 +528,11 @@ class SessionManager(private val project: Project) {
         clearDiffs()
         processedDiffs.clear()
         activeSessionId = null
+    }
+
+    override fun dispose() {
+        logger.debug("Disposing SessionManager")
+        clear()
+        apiClient = null
     }
 }
