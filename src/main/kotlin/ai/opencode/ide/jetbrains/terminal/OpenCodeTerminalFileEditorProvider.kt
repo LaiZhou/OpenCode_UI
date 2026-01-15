@@ -56,11 +56,14 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
         val widget = terminalWidgets[file]
         
         if (widget == null) {
-            logger.error("Terminal widget not registered for file: ${file.name}")
-            throw IllegalStateException("Terminal widget not registered for file: ${file.name}. Make sure registerWidget() is called before opening the file.")
+            // This happens when IDE restores a session but our plugin hasn't re-initialized the terminal yet.
+            // Instead of crashing, we create a placeholder editor. OpenCodeService will likely close this
+            // and open a fresh one when connection is established.
+            logger.warn("Terminal widget not found for file: ${file.name} (likely restoring from previous session)")
+        } else {
+            logger.debug("Creating terminal editor for file: ${file.name}")
         }
         
-        logger.debug("Creating terminal editor for file: ${file.name}")
         return OpenCodeTerminalFileEditor(project, file, widget)
     }
 

@@ -52,7 +52,7 @@ class DiffViewerService(private val project: Project) : Disposable {
 
         // Fallback: single diff when there is only one pending change.
         val fileType = FileTypeManager.getInstance().getFileTypeByFileName(entry.diff.file)
-        val beforeText = entry.diff.before
+        val beforeText = resolveBeforeContent(entry)
         val afterText = resolveAfterContent(entry)
         val beforeContent = DiffContentFactory.getInstance().create(project, beforeText, fileType)
         val afterContent = DiffContentFactory.getInstance().create(project, afterText, fileType)
@@ -90,7 +90,7 @@ class DiffViewerService(private val project: Project) : Disposable {
             val title = entry.diff.file
 
             // Get diff content, fallback to disk read if server returns empty (e.g. for non-ASCII filenames)
-            val beforeText = entry.diff.before
+            val beforeText = resolveBeforeContent(entry)
             val afterText = resolveAfterContent(entry)
 
             val request = SimpleDiffRequest(
@@ -184,6 +184,16 @@ class DiffViewerService(private val project: Project) : Disposable {
         }
         
         return afterText
+    }
+
+    /**
+     * Get diff before content.
+     * 
+     * Delegates to SessionManager.resolveBeforeContent() to ensure
+     * CONSISTENCY between what is displayed and what Reject restores.
+     */
+    private fun resolveBeforeContent(entry: DiffEntry): String {
+        return project.service<SessionManager>().resolveBeforeContent(entry.diff.file, entry.diff.before)
     }
 
     /**

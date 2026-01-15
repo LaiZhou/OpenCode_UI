@@ -49,6 +49,15 @@ class SessionManager(private val project: Project) : Disposable {
     // Key: FilePath, Value: AfterContent
     private val processedDiffs = ConcurrentHashMap<String, String>()
 
+    // Snapshot of file content captured when session becomes busy (AI starts working)
+    // Used ONLY for Reject fallback when server returns empty 'before' (server bug)
+    // Key: FilePath, Value: Content at the moment session becomes busy
+    private val baselineSnapshot = ConcurrentHashMap<String, String>()
+
+    // Flag to track if the session is currently in a busy cycle
+    // Used to capture baseline only once at the start of the busy cycle
+    private var isCurrentlyBusy = false
+
 
     /**
      * Set the API client for server operations.
@@ -82,8 +91,8 @@ class SessionManager(private val project: Project) : Disposable {
      */
     fun onSessionCompleted(sessionId: String, fileCount: Int) {
         if (fileCount > 0) {
-            createLocalHistoryLabel("OpenCode")
-            logger.info("Created LocalHistory label: OpenCode (modified $fileCount files)")
+            createLocalHistoryLabel("OpenCode Modified After")
+            logger.info("Created LocalHistory label: OpenCode Modified After (modified $fileCount files)")
         }
     }
 
@@ -122,19 +131,41 @@ class SessionManager(private val project: Project) : Disposable {
         val result = diffs.filter { diff ->
             val lastContent = processedDiffs[diff.file]
             val isFirstTime = lastContent == null
+            val baseline = baselineSnapshot[diff.file]
             
             // Resolve effective 'after' content (handle server bug where chinese file content is empty)
             val effectiveAfter = resolveEffectiveContent(diff)
             
-            val contentChanged = lastContent != effectiveAfter
-            val isNew = isFirstTime || contentChanged
+            // Detailed Debug Logging
+            logger.info("[Diff Debug] Checking file: ${diff.file}")
+            logger.info("  Server Before: len=${diff.before.length}")
+            logger.info("  Server After:  len=${diff.after.length}")
+            logger.info("  Baseline:      ${if (baseline != null) "Present (len=${baseline.length})" else "Missing (Null)"}")
+            logger.info("  Last Content:  ${if (lastContent != null) "Present (len=${lastContent.length})" else "Missing (First Time)"}")
+            logger.info("  Effect After:  len=${effectiveAfter.length}")
+            
+            // 1. AI changed its mind (new content generated)
+            val aiChangedMind = lastContent != effectiveAfter
+            
+            // 2. Baseline context changed (User modified file)
+            // If the starting point (baseline) has changed since last round, 
+            // the diff context is new (e.g. C->B vs A->B), so we should show it
+            // even if AI's target content (B) is the same.
+            val contextChanged = baseline != null && lastContent != null && baseline != lastContent
+            
+            val isNew = isFirstTime || aiChangedMind || contextChanged
             
             if (!isNew) {
-                logger.info("[Diff Filter] SKIP: ${diff.file} (content unchanged, implicit accept)")
-            } else if (isFirstTime) {
-                logger.info("[Diff Filter] NEW: ${diff.file} (first time seeing this file)")
+                logger.info("[Diff Filter] DECISION: SKIP (implicit accept)")
+                logger.info("  Reason: aiChangedMind=$aiChangedMind, contextChanged=$contextChanged")
             } else {
-                logger.info("[Diff Filter] CHANGED: ${diff.file} (content differs from last time)")
+                val reason = when {
+                    isFirstTime -> "first time"
+                    aiChangedMind -> "AI changed content"
+                    contextChanged -> "baseline context changed"
+                    else -> "unknown"
+                }
+                logger.info("[Diff Filter] DECISION: SHOW ($reason)")
             }
             isNew
         }
@@ -163,9 +194,13 @@ class SessionManager(private val project: Project) : Disposable {
                 try {
                     val file = java.io.File(absPath)
                     if (file.exists() && file.isFile) {
-                        return file.readText()
+                        val content = file.readText()
+                        logger.info("[Diff Resolve] Server 'after' empty. Loaded from disk: ${diff.file} (len=${content.length})")
+                        return content
                     }
-                } catch (_: Exception) { }
+                } catch (e: Exception) {
+                    logger.warn("[Diff Resolve] Failed to read disk fallback for ${diff.file}: ${e.message}")
+                }
             }
         }
         return diff.after
@@ -179,8 +214,120 @@ class SessionManager(private val project: Project) : Disposable {
 
         if (status.isBusy()) {
             activeSessionId = sessionId
+            
+            // Only capture snapshot at the START of a busy cycle
+            // This prevents overwriting the snapshot with intermediate AI changes
+            // if server sends multiple 'busy' events during generation
+            if (!isCurrentlyBusy) {
+                isCurrentlyBusy = true
+                // Capture baseline snapshot BEFORE AI modifies files
+                // This is used as fallback when server returns empty 'before' (bug)
+                captureBaselineSnapshot()
+                // Create LocalHistory label for user recovery
+                createLocalHistoryLabel("OpenCode Modified Before")
+            }
+        } else {
+            // Reset busy flag when session becomes idle/done/error
+            isCurrentlyBusy = false
         }
+    }
+    
+    /**
+     * Capture current content of all dirty files as baseline.
+     * Called when session becomes busy (AI starts working).
+     * 
+     * IMPORTANT: This must complete BEFORE AI starts modifying files,
+     * so it runs synchronously (blocking) to ensure we capture the true "before" state.
+     */
+    private fun captureBaselineSnapshot() {
+        val projectPath = project.basePath ?: return
+        
+        // Use -c core.quotepath=false to ensure Chinese filenames are output as raw UTF-8, not octal escaped sequences
+        val gitConfig = listOf("-c", "core.quotepath=false")
+        
+        val untracked = runGitCommandAndGetOutput(gitConfig + listOf("ls-files", "--others", "--exclude-standard"), projectPath)
+        val modified = runGitCommandAndGetOutput(gitConfig + listOf("diff", "--name-only"), projectPath)
+        val staged = runGitCommandAndGetOutput(gitConfig + listOf("diff", "--name-only", "--cached"), projectPath)
+        
+        val allFiles = (untracked + modified + staged).distinct()
+        
+        baselineSnapshot.clear()
+        var count = 0
+        allFiles.forEach { filePath ->
+            if (filePath.isNotBlank()) {
+                val absPath = toAbsolutePath(filePath)
+                if (absPath != null) {
+                    try {
+                        val file = java.io.File(absPath)
+                        if (file.exists() && file.isFile) {
+                            baselineSnapshot[filePath] = file.readText()
+                            count++
+                        }
+                    } catch (e: Exception) {
+                        logger.warn("Failed to capture baseline for: $filePath")
+                    }
+                }
+            }
+        }
+        logger.info("Captured baseline snapshot: $count dirty files")
+    }
 
+    /**
+     * Resolve the "before" content for a file.
+     * 
+     * This is the SINGLE SOURCE OF TRUTH used by both:
+     * - DiffViewerService (to display the left pane)
+     * - rejectDiff() (to restore the file)
+     * 
+     * Priority:
+     * 1. Server returned 'before' (normal case)
+     * 2. Baseline snapshot (captured when session became busy - handles unstaged/chinese bug)
+     * 3. Git HEAD (final fallback for tracked files)
+     * 4. Empty string (new untracked file)
+     */
+    fun resolveBeforeContent(filePath: String, serverBefore: String): String {
+        // 1. Server provided content - trust it
+        if (serverBefore.isNotEmpty()) {
+            logger.info("[ResolveBefore] Using Server Content: $filePath (len=${serverBefore.length})")
+            return serverBefore
+        }
+        
+        // 2. Use baseline snapshot (captured before AI started)
+        val baseline = baselineSnapshot[filePath]
+        if (baseline != null) {
+            logger.info("[ResolveBefore] Using Baseline Snapshot: $filePath (len=${baseline.length})")
+            return baseline
+        }
+        
+        // 3. Fallback to Git HEAD for tracked files
+        val projectPath = project.basePath
+        if (projectPath != null) {
+            val headContent = loadGitHeadContent(filePath, projectPath)
+            if (headContent != null) {
+                logger.info("[ResolveBefore] Using Git HEAD: $filePath (len=${headContent.length})")
+                return headContent
+            }
+        }
+        
+        // 4. New untracked file - empty is correct
+        logger.info("[ResolveBefore] No content found (new file): $filePath")
+        return ""
+    }
+    
+    private fun loadGitHeadContent(filePath: String, projectPath: String): String? {
+        return try {
+            val commandLine = GeneralCommandLine()
+                .withExePath("git")
+                .withWorkDirectory(projectPath)
+                .withParameters("show", "HEAD:$filePath")
+            
+            val handler = OSProcessHandler(commandLine)
+            val output = handler.process.inputStream.bufferedReader().readText()
+            handler.process.waitFor()
+            if (handler.process.exitValue() == 0) output else null
+        } catch (e: Exception) {
+            null
+        }
     }
 
     /**
@@ -200,6 +347,10 @@ class SessionManager(private val project: Project) : Disposable {
         return diffsByFile[filePath]
     }
 
+
+    fun getProcessedContent(filePath: String): String? {
+        return processedDiffs[filePath]
+    }
 
     // ========== Accept/Reject Operations ==========
 
@@ -241,61 +392,72 @@ class SessionManager(private val project: Project) : Disposable {
     /**
      * Reject a single file diff.
      * 
-     * Strategy:
-     * - Use diff.before content to restore file (NOT git restore to HEAD)
-     * - If before is empty and file is untracked, delete it (new file)
-     * - Tracked empty files are restored to empty content
-     * - If before has content, write it back to restore original state
-     * - This preserves user's unstaged changes and staging state
-     * 
-     * See docs/diff_feature_plan.md for all scenarios.
+     * Uses resolveBeforeContent() to get the restore target - this is the SAME
+     * content shown in the Diff viewer's left pane, ensuring consistency.
      */
     fun rejectDiff(filePath: String): Boolean {
         val projectPath = project.basePath ?: return false
         
-        // Get the DiffEntry to access before content
         val entry = diffsByFile[filePath]
         if (entry == null) {
-            logger.warn("No diff entry found for file: $filePath")
+            logger.warn("[Reject] No diff entry found for file: $filePath")
             return false
         }
         
-        val beforeContent = entry.diff.before
         val absPath = toAbsolutePath(filePath)
         if (absPath == null) {
-            logger.warn("Failed to resolve absolute path for: $filePath")
+            logger.warn("[Reject] Failed to resolve absolute path for: $filePath")
             return false
         }
         
         val file = java.io.File(absPath)
         val isTracked = runGitCommand(listOf("ls-files", "--error-unmatch", filePath), projectPath)
         
-        // LocalHistory Protection: Add label before any destructive operation
-        createLocalHistoryLabel("OpenCode: Before rejecting $filePath")
+        // Use the SAME logic as Diff display - what user sees is what they get
+        val restoreContent = resolveBeforeContent(filePath, entry.diff.before)
+        
+        logger.info("[Reject Debug] Processing reject for: $filePath")
+        logger.info("  Restore Content Len: ${restoreContent.length}")
+        logger.info("  File Exists: ${file.exists()}")
+        logger.info("  Git Tracked: $isTracked")
         
         val success = try {
-            if (beforeContent.isEmpty() && !isTracked) {
-                // Case A: before is empty and file is untracked = OpenCode created this file -> delete it
-                logger.info("Rejecting new untracked file (before is empty): $filePath")
-                if (file.exists()) file.delete() else true
+            val result = if (restoreContent.isNotEmpty()) {
+                // Normal case: restore to the resolved content
+                logger.info("[Reject Action] Restoring content to disk (len=${restoreContent.length})")
+                file.writeText(restoreContent)
+                true
+            } else if (!isTracked) {
+                // Untracked file with empty before = AI created this new file
+                if (entry.diff.deletions > 0) {
+                    // Safety: file had content but we lost it - refuse to delete
+                    logger.warn("[Reject Action] ABORTED: Untracked file has empty before but deletions > 0. Possible data loss risk.")
+                    false
+                } else {
+                    logger.info("[Reject Action] Deleting untracked new file")
+                    if (file.exists()) file.delete() else true
+                }
             } else {
-                // Case B-F: restore to original content (including tracked empty files)
-                // This only modifies worktree, preserving staging state
-                logger.info("Rejecting modified file (restoring before content): $filePath")
-                file.writeText(beforeContent)
+                // Tracked file with truly empty original (rare but valid)
+                logger.info("[Reject Action] Writing empty content to tracked file")
+                file.writeText("")
                 true
             }
+            
+            // Create label AFTER the operation so it marks the restored state
+            if (result) {
+                createLocalHistoryLabel("OpenCode Rejected $filePath")
+            }
+            result
         } catch (e: Exception) {
-            logger.warn("Failed to reject diff for file: $filePath", e)
+            logger.warn("[Reject] Failed to reject diff for file: $filePath", e)
             false
         }
 
         if (success) {
             diffsByFile.remove(filePath)
             removeFileFromBatches(filePath)
-            logger.info("Successfully rejected diff for file: $filePath (wasNewFile=${beforeContent.isEmpty() && !isTracked})")
-        } else {
-            logger.warn("Failed to reject diff for file: $filePath")
+            logger.info("Successfully rejected: $filePath")
         }
 
         refreshFiles(listOf(filePath))
@@ -367,14 +529,17 @@ class SessionManager(private val project: Project) : Disposable {
             val projectPath = project.basePath ?: return@executeOnPooledThread
             logger.info("Initializing diff baseline...")
             
+            // Use -c core.quotepath=false to ensure Chinese filenames are output as raw UTF-8
+            val gitConfig = listOf("-c", "core.quotepath=false")
+            
             // 1. Get untracked files
-            val untracked = runGitCommandAndGetOutput(listOf("ls-files", "--others", "--exclude-standard"), projectPath)
+            val untracked = runGitCommandAndGetOutput(gitConfig + listOf("ls-files", "--others", "--exclude-standard"), projectPath)
             
             // 2. Get modified files (unstaged)
-            val modified = runGitCommandAndGetOutput(listOf("diff", "--name-only"), projectPath)
+            val modified = runGitCommandAndGetOutput(gitConfig + listOf("diff", "--name-only"), projectPath)
             
             // 3. Get staged files
-            val staged = runGitCommandAndGetOutput(listOf("diff", "--name-only", "--cached"), projectPath)
+            val staged = runGitCommandAndGetOutput(gitConfig + listOf("diff", "--name-only", "--cached"), projectPath)
             
             val allFiles = (untracked + modified + staged).distinct()
             
@@ -475,8 +640,13 @@ class SessionManager(private val project: Project) : Disposable {
     }
 
     private fun toAbsolutePath(filePath: String): String? {
-        val raw = filePath.trim()
+        var raw = filePath.trim()
         if (raw.isEmpty()) return null
+        
+        // Remove surrounding quotes if present (Git output for paths with spaces/special chars)
+        if (raw.length >= 2 && raw.startsWith("\"") && raw.endsWith("\"")) {
+            raw = raw.substring(1, raw.length - 1)
+        }
 
         val basePath = project.basePath
         return try {
@@ -527,7 +697,9 @@ class SessionManager(private val project: Project) : Disposable {
     fun clear() {
         clearDiffs()
         processedDiffs.clear()
+        baselineSnapshot.clear()
         activeSessionId = null
+        isCurrentlyBusy = false
     }
 
     override fun dispose() {

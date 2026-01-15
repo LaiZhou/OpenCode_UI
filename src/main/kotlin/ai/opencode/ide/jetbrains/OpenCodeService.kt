@@ -7,6 +7,7 @@ import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.session.SessionManager
 import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditor
 import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditorProvider
+import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalLinkFilter
 import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalVirtualFile
 import ai.opencode.ide.jetbrains.ui.OpenCodeConnectDialog
 import ai.opencode.ide.jetbrains.util.PortFinder
@@ -22,6 +23,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -55,7 +57,10 @@ class OpenCodeService(private val project: Project) : Disposable {
     private var password: String? = null
     private var apiClient: OpenCodeApiClient? = null
     private var sseListener: SseEventListener? = null
-
+    
+    // Dev mode flag
+    private var isDevMode: Boolean = false
+    
     private val isConnected = AtomicBoolean(false)
     private val isConnecting = AtomicBoolean(false)
     private val connectionListeners = CopyOnWriteArrayList<(Boolean) -> Unit>()
@@ -64,7 +69,14 @@ class OpenCodeService(private val project: Project) : Disposable {
     private var terminalEditor: OpenCodeTerminalFileEditor? = null
     
     init {
-        setupTerminalCloseListener()
+        // Check environment variable for development mode
+        val envDevMode = System.getenv("OPENCODE_DEV_MODE")
+        if (envDevMode == "true") {
+            isDevMode = true
+            logger.info("OpenCode running in DEV MODE (from env var)")
+        }
+        
+        setupEditorListeners()
     }
 
     fun getPort(): Int? = port
@@ -77,7 +89,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     private val diffViewerService: DiffViewerService
         get() = project.service()
 
-    private fun setupTerminalCloseListener() {
+    private fun setupEditorListeners() {
         project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
             override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
                 if (file is OpenCodeTerminalVirtualFile && file == terminalVirtualFile) {
@@ -94,6 +106,17 @@ class OpenCodeService(private val project: Project) : Disposable {
                     OpenCodeTerminalFileEditorProvider.unregisterWidget(file)
                     terminalVirtualFile = null
                     terminalEditor = null
+                }
+            }
+
+            override fun selectionChanged(event: FileEditorManagerEvent) {
+                val newFile = event.newFile
+                if (newFile is OpenCodeTerminalVirtualFile && newFile == terminalVirtualFile) {
+                    // When user switches back to OpenCode terminal tab, ensure widget gets focus
+                    // This handles cases like returning from Diff View or other editors
+                    ApplicationManager.getApplication().invokeLater {
+                        terminalEditor?.terminalWidget?.preferredFocusableComponent?.requestFocusInWindow()
+                    }
                 }
             }
         })
@@ -228,6 +251,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun createTerminalAndConnect(hostname: String, port: Int) {
         val terminalView = TerminalView.getInstance(project)
         val widget = terminalView.createLocalShellWidget(project.basePath, OPEN_CODE_TAB_NAME)
+        OpenCodeTerminalLinkFilter.install(project, widget)
 
         val virtualFile = OpenCodeTerminalVirtualFile(OPEN_CODE_TAB_NAME)
         
@@ -465,10 +489,12 @@ class OpenCodeService(private val project: Project) : Disposable {
         
         val editor = terminalEditor ?: return false
         val virtualFile = terminalVirtualFile ?: return false
-        val widget = editor.terminalWidget
+        val widget = editor.terminalWidget ?: return false
 
         widget.ttyConnector?.let { tty ->
-            tty.write(text)
+            // Use byte array write for atomic operation
+            // UTF-8 encoding ensures proper handling of CJK characters
+            tty.write(text.toByteArray(Charsets.UTF_8))
         }
         
         val fileEditorManager = FileEditorManager.getInstance(project)
@@ -500,11 +526,40 @@ class OpenCodeService(private val project: Project) : Disposable {
         connectionListeners.clear()
         isConnected.set(false)
         
+        // Terminate the OpenCode process to release the port
+        terminateOpenCodeProcess()
+        
         terminalVirtualFile?.let { OpenCodeTerminalFileEditorProvider.unregisterWidget(it) }
         terminalVirtualFile = null
         terminalEditor = null
         
         // Clear static map for dynamic plugin unloading support
         OpenCodeTerminalFileEditorProvider.clearAll()
+    }
+
+    /**
+     * Terminate the OpenCode process running in the terminal.
+     * This releases the port when IDE closes.
+     */
+    private fun terminateOpenCodeProcess() {
+        try {
+            val widget = terminalEditor?.terminalWidget ?: return
+            val processTtyConnector = widget.processTtyConnector ?: return
+            val process = processTtyConnector.process
+            
+            if (process.isAlive) {
+                logger.info("Terminating OpenCode process to release port $port")
+                process.destroy()
+                
+                // Give it a moment to terminate gracefully
+                if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                    logger.warn("OpenCode process did not terminate gracefully, forcing...")
+                    process.destroyForcibly()
+                }
+                logger.info("OpenCode process terminated")
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to terminate OpenCode process: ${e.message}")
+        }
     }
 }

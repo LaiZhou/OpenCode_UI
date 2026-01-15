@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.3"
+version = "1.0.4"
 
 repositories {
     mavenCentral()
@@ -39,13 +39,10 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.3</h2>
+            <h2>1.0.4</h2>
             <ul>
-                <li><strong>Dynamic Plugin Support:</strong> Plugin now supports hot reload without IDE restart. All services properly implement Disposable interface and clean up resources on unload.</li>
-                <li><strong>Terminal in Editor Tab:</strong> OpenCode terminal now opens in editor area tab instead of bottom panel, providing larger display space for TUI interface.</li>
-                <li><strong>Memory Leak Fixes:</strong> Fixed MessageBus connection leaks and static map cleanup issues to prevent memory accumulation during plugin reloads.</li>
-                <li><strong>Code Quality:</strong> All source code and comments converted to English, following international development standards.</li>
-                <li><strong>Error Handling:</strong> Enhanced error handling with proper user feedback and logging throughout the plugin.</li>
+                <li>Added support for clickable file links (@file#Lx-y) in terminal with optimized cursor handling.</li>
+                <li>Fixed diff logic for Chinese/Unstaged files using baseline snapshots to prevent data loss on reject.</li>
             </ul>
         """.trimIndent()
     }
