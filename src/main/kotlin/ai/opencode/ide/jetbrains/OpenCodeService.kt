@@ -260,27 +260,29 @@ class OpenCodeService(private val project: Project) : Disposable {
         // Register widget before opening file
         OpenCodeTerminalFileEditorProvider.registerWidget(virtualFile, widget)
 
-        val fileEditorManager = FileEditorManager.getInstance(project)
-        val editors = fileEditorManager.openFile(virtualFile, true)
-        
-        // Improved error handling
-        terminalEditor = editors.firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
-        
-        if (terminalEditor == null) {
-            logger.error("Failed to create OpenCode terminal editor")
-            OpenCodeTerminalFileEditorProvider.unregisterWidget(virtualFile)
-            terminalVirtualFile = null
-            ApplicationManager.getApplication().invokeLater {
-                Messages.showErrorDialog(
-                    project,
-                    "Failed to create OpenCode terminal. Please try again.",
-                    "OpenCode Terminal Error"
-                )
-            }
-            return
-        }
-        
+        // Defer opening file to the next EDT cycle to avoid potential deadlocks
+        // with FileEditorManager's synchronous wait logic
         ApplicationManager.getApplication().invokeLater {
+            val fileEditorManager = FileEditorManager.getInstance(project)
+            val editors = fileEditorManager.openFile(virtualFile, true)
+            
+            // Improved error handling
+            terminalEditor = editors.firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
+            
+            if (terminalEditor == null) {
+                logger.error("Failed to create OpenCode terminal editor")
+                OpenCodeTerminalFileEditorProvider.unregisterWidget(virtualFile)
+                terminalVirtualFile = null
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showErrorDialog(
+                        project,
+                        "Failed to create OpenCode terminal. Please try again.",
+                        "OpenCode Terminal Error"
+                    )
+                }
+                return@invokeLater
+            }
+            
             val command = "opencode --hostname $hostname --port $port"
             widget.executeCommand(command)
 

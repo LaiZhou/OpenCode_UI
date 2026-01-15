@@ -191,19 +191,37 @@ class SessionManager(private val project: Project) : Disposable {
         if (diff.after.isEmpty() && diff.additions > 0) {
             val absPath = toAbsolutePath(diff.file)
             if (absPath != null) {
-                try {
-                    val file = java.io.File(absPath)
-                    if (file.exists() && file.isFile) {
-                        val content = file.readText()
+                val file = java.io.File(absPath)
+                if (file.exists() && file.isFile) {
+                    val content = readFileContent(file)
+                    if (content.isNotEmpty()) {
                         logger.info("[Diff Resolve] Server 'after' empty. Loaded from disk: ${diff.file} (len=${content.length})")
                         return content
                     }
-                } catch (e: Exception) {
-                    logger.warn("[Diff Resolve] Failed to read disk fallback for ${diff.file}: ${e.message}")
                 }
             }
         }
         return diff.after
+    }
+    
+    /**
+     * Read file content using IDE's VirtualFileSystem to ensure correct encoding (e.g. GBK, UTF-8 with BOM).
+     * Fallback to java.io.File if VirtualFile is not available.
+     */
+    private fun readFileContent(file: java.io.File): String {
+        return try {
+            val virtualFile = LocalFileSystem.getInstance().findFileByIoFile(file)
+            if (virtualFile != null) {
+                com.intellij.openapi.application.runReadAction {
+                    String(virtualFile.contentsToByteArray(), virtualFile.charset)
+                }
+            } else {
+                file.readText()
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to read file content: ${file.path}", e)
+            ""
+        }
     }
 
     /**
@@ -260,7 +278,7 @@ class SessionManager(private val project: Project) : Disposable {
                     try {
                         val file = java.io.File(absPath)
                         if (file.exists() && file.isFile) {
-                            baselineSnapshot[filePath] = file.readText()
+                            baselineSnapshot[filePath] = readFileContent(file)
                             count++
                         }
                     } catch (e: Exception) {
@@ -552,7 +570,7 @@ class SessionManager(private val project: Project) : Disposable {
                             val file = java.io.File(absPath)
                             if (file.exists() && file.isFile) {
                                 // Record current content as "processed"
-                                processedDiffs[filePath] = file.readText()
+                                processedDiffs[filePath] = readFileContent(file)
                                 count++
                             }
                         } catch (e: Exception) {
