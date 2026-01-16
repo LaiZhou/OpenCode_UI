@@ -365,18 +365,38 @@ class OpenCodeService(private val project: Project) : Disposable {
         ApplicationManager.getApplication().invokeLater {
             val editors = FileEditorManager.getInstance(project).openFile(virtualFile, true)
             
-            // Pin the tab to keep it on the left and prevent accidental closing
-            pinTerminalTab(virtualFile)
-            
             terminalEditor = editors.firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
             
             if (terminalEditor != null) {
                 // Use --continue to load the most recent session if available
                 val command = "opencode --hostname $host --port $port --continue"
                 widget.executeCommand(command)
+                
+                // Pin the tab to keep it on the left (IntelliJ default behavior for pinned tabs)
+                pinTerminalTab(virtualFile)
             } else {
                 logger.error("Failed to create terminal editor")
             }
+        }
+    }
+    
+    /**
+     * Pins the terminal tab. 
+     * Pinned tabs are displayed on the left side of the editor tab bar (before unpinned tabs).
+     */
+    private fun pinTerminalTab(file: VirtualFile) {
+        try {
+            val managerEx = FileEditorManagerEx.getInstanceEx(project)
+            
+            // Try to pin in the current window
+            managerEx.currentWindow?.let { window ->
+                if (!window.isFilePinned(file)) {
+                    window.setFilePinned(file, true)
+                }
+                return
+            }
+        } catch (e: Exception) {
+            logger.debug("Failed to pin terminal tab", e)
         }
     }
 
@@ -405,25 +425,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
     
-    /**
-     * Pins the terminal tab. Pinned tabs are typically displayed on the left side
-     * and are protected from automatic closing.
-     */
-    private fun pinTerminalTab(file: VirtualFile) {
-        // Disabled per user request - users prefer normal tabs with close buttons.
-        // The stability issue is now resolved via "Delayed Disposal" in the provider.
-        /*
-        try {
-            val managerEx = FileEditorManagerEx.getInstanceEx(project)
-            val window = managerEx.currentWindow
-            if (window != null && !window.isFilePinned(file)) {
-                window.setFilePinned(file, true)
-            }
-        } catch (e: Exception) {
-            logger.debug("Failed to pin terminal tab", e)
-        }
-        */
-    }
+
 
     // ==================== Connection Manager ====================
 

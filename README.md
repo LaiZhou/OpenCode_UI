@@ -99,6 +99,8 @@ When OpenCode edits files, the plugin opens a native IDE diff viewer.
 
 The plugin sends a system notification when OpenCode finishes a task (transitions from Busy to Idle). This allows you to switch to other work while the AI is generating code, and be notified immediately when it's done.
 
+> **Tip**: To receive desktop notifications, please ensure your operating system allows notifications for the JetBrains IDE (e.g., on macOS: *System Settings > Notifications > IntelliJ IDEA*).
+
 ### 6. Smart File Links
 
 File paths in the terminal output (e.g., `@src/main/kotlin/Main.kt#L10-20`) are clickable. Clicking them opens the file in the editor and highlights the referenced lines.
