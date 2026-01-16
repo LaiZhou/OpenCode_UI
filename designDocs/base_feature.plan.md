@@ -70,6 +70,54 @@ SendSelectionToTerminalAction          # Opt+Cmd+K handler
 
 ```
 
+### Session & API Client 监听机制
+
+**核心机制：Active Pull (恢复) + Real-time Push (SSE)**
+
+监听器绑定到**项目路径**，而非单一 Session。这意味着只要是同一个 Server 对该项目的操作，IDE 都能感知并自动切换焦点。
+
+```mermaid
+sequenceDiagram
+    participant IDE as OpenCode Plugin
+    participant API as API Client
+    participant SSE as SSE Listener
+    participant Server as OpenCode Server
+
+    Note over IDE, Server: 1. 连接与恢复 (Pull)
+    IDE->>API: GET /session/status?directory={path}
+    alt 有忙碌会话
+        API-->>IDE: 返回 Busy Session ID
+    else 无忙碌会话
+        IDE->>API: GET /session?directory={path}
+        API-->>IDE: 返回 Session 列表 (按 update 排序)
+        IDE->>IDE: 选定最近 Session 为 Active
+    end
+
+    Note over IDE, Server: 2. 实时监听 (Push)
+    IDE->>SSE: 连接 /event?directory={path}
+    loop SSE Event Stream
+        Server-->>SSE: Event (Status/Idle/FileEdited)
+        SSE-->>IDE: Dispatch Event
+        
+        alt Event: Session Status (Busy)
+            IDE->>IDE: 更新 Active Session ID
+            IDE->>IDE: 捕获本地文件快照 (Baseline Snapshot)
+        else Event: File Edited
+            IDE->>IDE: 刷新 VFS (FileDocumentManager)
+        else Event: Session Idle (完成)
+            IDE->>API: GET /session/{id}/diff
+            API-->>IDE: 返回 Diff 数据
+            IDE->>IDE: 弹出 Diff Viewer 界面
+        end
+    end
+```
+
+**关键策略：**
+
+1.  **项目级锁定**：监听基于物理路径，覆盖该路径下所有并发 Session。
+2.  **活跃抢占 (Active Preemption)**：任何 Session 变更为 `busy` 状态即成为 `activeSessionId`，确保 Diff Viewer 始终展示当前正在工作的 AI 上下文。
+3.  **基准快照 (Baseline Snapshot)**：在 `busy` 瞬间捕获本地文件状态，作为 `Reject` 操作的“真理来源”，解决服务端 `before` 内容可能不准的问题。
+
 ### 关键 API
 
 - `TerminalView.createLocalShellWidget()` - 创建 Terminal widget
