@@ -46,7 +46,7 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
         }
 
         /**
-         * Schedule widget for disposal with a safety delay (2 seconds).
+         * Schedule widget for disposal with a safety delay (5 seconds).
          * This handles the "Tab Move" scenario where a tab is closed and immediately re-opened.
          */
         fun scheduleDisposal(file: OpenCodeTerminalVirtualFile, project: Project) {
@@ -56,7 +56,7 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
             // Only schedule if we actually have a widget to dispose
             if (!terminalWidgets.containsKey(file)) return
 
-            logger.debug("Scheduling disposal check for ${file.name} in 2000ms")
+            logger.debug("Scheduling disposal check for ${file.name} in 5000ms")
             
             val task = AppExecutorUtil.getAppScheduledExecutorService().schedule({
                 // Must run on EDT to check FileEditorManager status safely
@@ -77,7 +77,7 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
                         disposeWidget(file)
                     }
                 }
-            }, 2000, TimeUnit.MILLISECONDS)
+            }, 5000, TimeUnit.MILLISECONDS)
             
             disposalTasks[file] = task
         }

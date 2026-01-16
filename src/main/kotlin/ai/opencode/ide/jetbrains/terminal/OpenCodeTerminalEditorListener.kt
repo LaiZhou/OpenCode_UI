@@ -16,7 +16,7 @@ import com.intellij.openapi.vfs.VirtualFile
 class OpenCodeTerminalEditorListener : FileEditorManagerListener {
     override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
         if (file is OpenCodeTerminalVirtualFile) {
-            // Schedule disposal with a delay (2 seconds).
+            // Schedule disposal with a delay (5 seconds).
             // Pass the project reference so we can check if the file is still open later.
             OpenCodeTerminalFileEditorProvider.scheduleDisposal(file, source.project)
         }
