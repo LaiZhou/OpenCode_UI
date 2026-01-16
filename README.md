@@ -12,6 +12,9 @@ A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the o
 | **Quick Launch** | Connect to existing OpenCode server or create new terminal | `Cmd + Esc` | `Ctrl + Esc` |
 | **Add to Terminal** | Send current file/selection or selected files to OpenCode | `Opt + Cmd + K` | `Ctrl + Alt + K` |
 | **Diff Review** | View diffs and accept/reject changes in IDE | — | — |
+| **Notifications** | System alert when task completes | — | — |
+| **Auto-Resume** | Restore last session on launch | — | — |
+| **Smart Links** | Clickable file paths in terminal | — | — |
 
 ### Feature Comparison with Claude Code
 
@@ -92,7 +95,13 @@ When OpenCode edits files, the plugin opens a native IDE diff viewer.
 ![Diff Viewer - Accept](images/5.png)
 ![Diff Viewer - Reject](images/6.png)
 
-> **Safety**: The plugin automatically creates snapshots in your IDE's Local History, so you can always recover previous versions if needed.
+### 5. Task Notifications
+
+The plugin sends a system notification when OpenCode finishes a task (transitions from Busy to Idle). This allows you to switch to other work while the AI is generating code, and be notified immediately when it's done.
+
+### 6. Smart File Links
+
+File paths in the terminal output (e.g., `@src/main/kotlin/Main.kt#L10-20`) are clickable. Clicking them opens the file in the editor and highlights the referenced lines.
 
 ## Keyboard Shortcuts
 

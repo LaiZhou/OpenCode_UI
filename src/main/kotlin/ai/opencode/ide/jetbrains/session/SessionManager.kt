@@ -494,25 +494,29 @@ class SessionManager(private val project: Project) : Disposable {
         val title = "OpenCode Task Completed"
         val content = "Session $sessionId is now idle."
         
-        // 1. IDE Notification (Balloon)
-        val notificationGroup = NotificationGroupManager.getInstance()
-            .getNotificationGroup("OpenCode")
+        // Ensure UI updates happen on EDT
+        ApplicationManager.getApplication().invokeLater {
+            // 1. IDE Notification (Balloon)
+            val notificationGroup = NotificationGroupManager.getInstance()
+                .getNotificationGroup("OpenCode")
 
-        val notification = notificationGroup.createNotification(
-            title,
-            content,
-            NotificationType.INFORMATION
-        )
+            val notification = notificationGroup.createNotification(
+                title,
+                content,
+                NotificationType.INFORMATION
+            )
 
-        notification.notify(project)
-        
-        // 2. System Notification (OS Level)
-        // This ensures the user sees it even if the IDE is not focused
-        try {
-            SystemNotifications.getInstance().notify("OpenCode", title, content)
-        } catch (e: Throwable) {
-            // Fallback or ignore if system notifications are not supported/allowed
-            logger.debug("System notification failed", e)
+            notification.notify(project)
+            
+            // 2. System Notification (OS Level)
+            // This ensures the user sees it even if the IDE is not focused.
+            // Note: On macOS, this might require "System Preferences > Notifications" permission for the IDE.
+            try {
+                SystemNotifications.getInstance().notify("OpenCode", title, content)
+            } catch (e: Throwable) {
+                // Fallback or ignore if system notifications are not supported/allowed
+                logger.debug("System notification failed", e)
+            }
         }
     }
 
