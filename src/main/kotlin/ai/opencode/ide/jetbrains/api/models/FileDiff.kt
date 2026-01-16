@@ -28,8 +28,12 @@ class FileDiffDeserializer : JsonDeserializer<FileDiff> {
         
         return FileDiff(
             file = decodeGoQuotedString(obj.get("file")?.asString ?: ""),
-            before = decodeGoQuotedString(obj.get("before")?.asString ?: ""),
-            after = decodeGoQuotedString(obj.get("after")?.asString ?: ""),
+            // before 和 after 字段是普通 JSON 字符串，不需要 decodeGoQuotedString 解码
+            // 否则会导致：
+            // 1. 内容首尾的双引号被错误去除
+            // 2. 内容中的反斜杠被错误转义 (e.g. "\\n" -> "\n")
+            before = obj.get("before")?.asString ?: "",
+            after = obj.get("after")?.asString ?: "",
             additions = obj.get("additions")?.asInt ?: 0,
             deletions = obj.get("deletions")?.asInt ?: 0
         )
@@ -85,8 +89,18 @@ class FileDiffDeserializer : JsonDeserializer<FileDiff> {
                         s[i + 1] == '"' -> { bytes.add('"'.code.toByte()); i += 2; continue }
                     }
                 }
-                // 普通 ASCII 字符
-                bytes.add(s[i].code.toByte())
+                
+                // 普通字符 (ASCII 或 Unicode)
+                // 修复: 原来的 s[i].code.toByte() 会导致非 ASCII 字符 (如中文) 被截断从而乱码
+                val c = s[i]
+                if (c.code < 128) {
+                    bytes.add(c.code.toByte())
+                } else {
+                    val charBytes = c.toString().toByteArray(Charsets.UTF_8)
+                    for (b in charBytes) {
+                        bytes.add(b)
+                    }
+                }
                 i++
             }
             

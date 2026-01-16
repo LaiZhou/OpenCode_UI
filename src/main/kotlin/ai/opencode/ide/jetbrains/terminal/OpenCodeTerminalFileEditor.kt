@@ -66,12 +66,16 @@ class OpenCodeTerminalFileEditor(
         if (isDisposed.compareAndSet(false, true)) {
             logger.debug("Disposing OpenCode terminal editor for: ${virtualFile.name}")
             try {
-                terminalWidget?.dispose()
+                // Do NOT dispose the terminal widget here.
+                // When moving a tab (splitting or detaching), the editor is disposed and recreated.
+                // Disposing the widget here would kill the terminal session during a move.
+                // The widget lifecycle is managed by OpenCodeTerminalEditorListener and OpenCodeTerminalFileEditorProvider.
+                
                 for (listener in propertyChangeSupport.propertyChangeListeners) {
                     propertyChangeSupport.removePropertyChangeListener(listener)
                 }
             } catch (e: Exception) {
-                logger.warn("Error disposing terminal widget", e)
+                logger.warn("Error disposing terminal editor resources", e)
             }
         }
     }
