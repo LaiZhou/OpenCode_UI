@@ -371,7 +371,8 @@ class OpenCodeService(private val project: Project) : Disposable {
             terminalEditor = editors.firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
             
             if (terminalEditor != null) {
-                val command = "opencode --hostname $host --port $port"
+                // Use --continue to load the most recent session if available
+                val command = "opencode --hostname $host --port $port --continue"
                 widget.executeCommand(command)
             } else {
                 logger.error("Failed to create terminal editor")

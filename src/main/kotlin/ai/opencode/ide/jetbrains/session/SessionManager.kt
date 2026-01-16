@@ -7,6 +7,9 @@ import com.intellij.execution.process.OSProcessHandler
 import com.intellij.history.LocalHistory
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
+import com.intellij.ui.SystemNotifications
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -239,16 +242,21 @@ class SessionManager(private val project: Project) : Disposable {
             if (!isCurrentlyBusy) {
                 isCurrentlyBusy = true
                 // Capture baseline snapshot BEFORE AI modifies files
-                // This is used as fallback when server returns empty 'before' (bug)
+                // This is used as fallback when server returns empty 'before' (server bug)
                 captureBaselineSnapshot()
                 // Create LocalHistory label for user recovery
                 createLocalHistoryLabel("OpenCode Modified Before")
             }
         } else {
+            // Check if we are transitioning from busy to idle
+            if (isCurrentlyBusy && status.isIdle()) {
+                showSessionCompletedNotification(sessionId)
+            }
             // Reset busy flag when session becomes idle/done/error
             isCurrentlyBusy = false
         }
     }
+
     
     /**
      * Capture current content of all dirty files as baseline.
@@ -482,6 +490,32 @@ class SessionManager(private val project: Project) : Disposable {
         return success
     }
     
+    private fun showSessionCompletedNotification(sessionId: String) {
+        val title = "OpenCode Task Completed"
+        val content = "Session $sessionId is now idle."
+        
+        // 1. IDE Notification (Balloon)
+        val notificationGroup = NotificationGroupManager.getInstance()
+            .getNotificationGroup("OpenCode")
+
+        val notification = notificationGroup.createNotification(
+            title,
+            content,
+            NotificationType.INFORMATION
+        )
+
+        notification.notify(project)
+        
+        // 2. System Notification (OS Level)
+        // This ensures the user sees it even if the IDE is not focused
+        try {
+            SystemNotifications.getInstance().notify("OpenCode", title, content)
+        } catch (e: Throwable) {
+            // Fallback or ignore if system notifications are not supported/allowed
+            logger.debug("System notification failed", e)
+        }
+    }
+
     /**
      * Create a project-level LocalHistory label.
      * Note: IntelliJ Platform only supports project-level labels, not file-level labels.
