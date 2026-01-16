@@ -409,6 +409,9 @@ class OpenCodeService(private val project: Project) : Disposable {
      * and are protected from automatic closing.
      */
     private fun pinTerminalTab(file: VirtualFile) {
+        // Disabled per user request - users prefer normal tabs with close buttons.
+        // The stability issue is now resolved via "Delayed Disposal" in the provider.
+        /*
         try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
             val window = managerEx.currentWindow
@@ -418,6 +421,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         } catch (e: Exception) {
             logger.debug("Failed to pin terminal tab", e)
         }
+        */
     }
 
     // ==================== Connection Manager ====================
