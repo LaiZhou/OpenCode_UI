@@ -39,7 +39,8 @@ class OpenCodeToolWindowFactory : ToolWindowFactory {
             object : ToolWindowManagerListener {
                 override fun toolWindowShown(tw: ToolWindow) {
                     if (tw.id == "OpenCode") {
-                        project.service<OpenCodeService>().focusOrCreateTerminal()
+                        // Interactive mode: Always show dialog/status if needed
+                        project.service<OpenCodeService>().focusOrCreateTerminal(interactive = true)
                         tw.hide()
                     }
                 }

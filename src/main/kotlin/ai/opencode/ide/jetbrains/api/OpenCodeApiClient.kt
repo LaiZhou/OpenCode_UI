@@ -97,6 +97,12 @@ class OpenCodeApiClient(
         return SseEventListener(baseUrl, directory, onEvent, onError, onConnected, onDisconnected, username, password)
     }
 
+    fun tuiAppendPrompt(text: String): Boolean {
+        val url = "$baseUrl/tui/append-prompt"
+        val body = TuiAppendPromptRequest(text)
+        return post(url, body) != null
+    }
+
     private fun encode(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")
 
     private fun <T> get(url: String, clazz: Class<T>): T? {

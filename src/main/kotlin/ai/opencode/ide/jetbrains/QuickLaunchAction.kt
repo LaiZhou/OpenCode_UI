@@ -11,7 +11,8 @@ import com.intellij.openapi.components.service
 class QuickLaunchAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        project.service<OpenCodeService>().focusOrCreateTerminal()
+        // Interactive mode: Always show dialog/status if needed
+        project.service<OpenCodeService>().focusOrCreateTerminal(interactive = true)
     }
 
     override fun update(e: AnActionEvent) {
