@@ -72,4 +72,9 @@
                 anchor="right"/>
 
   </extensions>
+
+  <projectListeners>
+    <listener class="ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalEditorListener"
+              topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+  </projectListeners>
 </idea-plugin>

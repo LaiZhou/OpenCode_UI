@@ -30,6 +30,8 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
+import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
+
 /**
  * Project-scoped service for managing OpenCode terminal and API integration.
  * 
@@ -190,11 +192,16 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun handleConnectedState(hasUI: Boolean, interactive: Boolean) {
         if (hasUI) {
             focusTerminalUI()
-        } else if (interactive) {
-            // Headless mode + user action -> Show status dialog
-            showHeadlessStatusDialog()
+        } else {
+            // We are connected, but no UI is visible (tab closed).
+            // If we have a valid terminal file, re-open it to restore the session.
+            if (terminalVirtualFile != null) {
+                focusTerminalUI()
+            } else if (interactive) {
+                // True headless mode (remote connection, no local terminal created ever)
+                showHeadlessStatusDialog()
+            }
         }
-        // Non-interactive + headless -> Do nothing (silent)
     }
 
     private fun handleDisconnectedWithUI(interactive: Boolean) {
@@ -357,6 +364,10 @@ class OpenCodeService(private val project: Project) : Disposable {
 
         ApplicationManager.getApplication().invokeLater {
             val editors = FileEditorManager.getInstance(project).openFile(virtualFile, true)
+            
+            // Pin the tab to keep it on the left and prevent accidental closing
+            pinTerminalTab(virtualFile)
+            
             terminalEditor = editors.firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
             
             if (terminalEditor != null) {
@@ -387,7 +398,26 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun focusTerminalUI() {
-        terminalVirtualFile?.let { FileEditorManager.getInstance(project).openFile(it, true) }
+        terminalVirtualFile?.let { 
+            FileEditorManager.getInstance(project).openFile(it, true)
+            pinTerminalTab(it)
+        }
+    }
+    
+    /**
+     * Pins the terminal tab. Pinned tabs are typically displayed on the left side
+     * and are protected from automatic closing.
+     */
+    private fun pinTerminalTab(file: VirtualFile) {
+        try {
+            val managerEx = FileEditorManagerEx.getInstanceEx(project)
+            val window = managerEx.currentWindow
+            if (window != null && !window.isFilePinned(file)) {
+                window.setFilePinned(file, true)
+            }
+        } catch (e: Exception) {
+            logger.debug("Failed to pin terminal tab", e)
+        }
     }
 
     // ==================== Connection Manager ====================
@@ -522,17 +552,9 @@ class OpenCodeService(private val project: Project) : Disposable {
     // ==================== Cleanup ====================
 
     private fun setupEditorListeners() {
-        project.messageBus.connect(this).subscribe(
-            FileEditorManagerListener.FILE_EDITOR_MANAGER,
-            object : FileEditorManagerListener {
-                override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
-                    if (file is OpenCodeTerminalVirtualFile && file == terminalVirtualFile) {
-                        logger.info("Terminal tab closed, resetting")
-                        disconnectAndReset()
-                    }
-                }
-            }
-        )
+        // Removed fileClosed listener that caused premature disconnection.
+        // We now allow the terminal session to persist in the background even if the tab is closed.
+        // Cleanup happens in dispose() (Project close).
     }
 
     override fun dispose() {
