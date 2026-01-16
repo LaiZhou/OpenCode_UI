@@ -41,8 +41,12 @@ intellijPlatform {
         changeNotes = """
             <h2>1.0.4</h2>
             <ul>
-                <li>Added support for clickable file links (@file#Lx-y) in terminal with optimized cursor handling.</li>
-                <li>Fixed diff logic for Chinese/Unstaged files using baseline snapshots to prevent data loss on reject.</li>
+                <li><b>Session Auto-Resume:</b> New terminals now automatically load the most recent session history.</li>
+                <li><b>Task Notification:</b> Added system notification when AI completes a task (Busy -> Idle).</li>
+                <li><b>Stability:</b> Fixed issue where moving the terminal tab caused disconnection.</li>
+                <li><b>Diff View:</b> Fixed garbled Chinese text and improved handling of unstaged files.</li>
+                <li><b>Input:</b> Improved prompt injection reliability using TUI API.</li>
+                <li><b>Links:</b> Added support for clickable file links (@file#Lx-y) in terminal.</li>
             </ul>
         """.trimIndent()
     }
