@@ -49,7 +49,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     private val logger = Logger.getInstance(OpenCodeService::class.java)
 
     companion object {
-        private const val OPEN_CODE_TAB_NAME = "OpenCode"
+        private const val OPEN_CODE_TAB_PREFIX = "OpenCode"
         private const val CONNECTION_RETRY_INTERVAL_MS = 5000L
     }
 
@@ -271,8 +271,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             ApplicationManager.getApplication().invokeLater {
                 val result = OpenCodeConnectDialog.show(project, suggestedPort)
                 if (result != null) {
-                    val (inputHost, inputPort) = result
-                    processConnectionChoice(inputHost, inputPort)
+                    processConnectionChoice(result.hostname, result.port, result.password)
                 }
             }
         }
@@ -283,13 +282,21 @@ class OpenCodeService(private val project: Project) : Disposable {
      * - If target port is already running OpenCode -> Connect directly (Headless for remote, Local UI for localhost)
      * - If target port is free -> Create new terminal and start server
      */
-    private fun processConnectionChoice(host: String, port: Int) {
+    private fun processConnectionChoice(host: String, port: Int, password: String?) {
         val isLocalhost = host in listOf("0.0.0.0", "127.0.0.1", "localhost")
         
         AppExecutorUtil.getAppExecutorService().submit {
             // Check if target port is already running OpenCode
-            val auth = if (isLocalhost) ProcessAuthDetector.detectAuthForPort(port) 
-                       else ProcessAuthDetector.ServerAuth("opencode", null)
+            val detectedAuth = if (isLocalhost) ProcessAuthDetector.detectAuthForPort(port) 
+                               else ProcessAuthDetector.ServerAuth("opencode", null)
+            
+            // Use user password if provided, otherwise fallback to detected/default
+            val auth = if (!password.isNullOrBlank()) {
+                ProcessAuthDetector.ServerAuth("opencode", password)
+            } else {
+                detectedAuth
+            }
+            
             val isRunning = PortFinder.isOpenCodeRunningOnPort(port, host, auth.username, auth.password)
             
             ApplicationManager.getApplication().invokeLater {
@@ -300,7 +307,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                 } else if (isLocalhost) {
                     // Localhost + port free -> Create new local instance
                     logger.info("Port $port is free, creating new terminal")
-                    createLocalTerminal(host, port)
+                    createLocalTerminal(host, port, password)
                 } else {
                     // Remote + port not running -> Show error
                     Messages.showErrorDialog(
@@ -328,7 +335,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         
         if (createUI) {
             // Create terminal UI that runs `opencode --hostname --port` to connect
-            createTerminalUI(host, port)
+            createTerminalUI(host, port, auth.password, continueSession = false)
         }
         
         initializeApiClient(host, port)
@@ -343,22 +350,25 @@ class OpenCodeService(private val project: Project) : Disposable {
     /**
      * Create a new local OpenCode instance with terminal UI.
      */
-    private fun createLocalTerminal(host: String, port: Int) {
+    private fun createLocalTerminal(host: String, port: Int, password: String?) {
         this.hostname = host
         this.port = port
+        this.username = if (password.isNullOrBlank()) null else "opencode"
+        this.password = password?.takeIf { it.isNotBlank() }
         
         // Auth will be detected after server starts
-        createTerminalUI(host, port)
+        createTerminalUI(host, port, password)
         initializeApiClient(host, port)
         startConnectionManager()
     }
 
-    private fun createTerminalUI(host: String, port: Int) {
+    private fun createTerminalUI(host: String, port: Int, password: String?, continueSession: Boolean = true) {
         val terminalView = TerminalView.getInstance(project)
-        val widget = terminalView.createLocalShellWidget(project.basePath, OPEN_CODE_TAB_NAME)
+        val tabName = "$OPEN_CODE_TAB_PREFIX($port)"
+        val widget = terminalView.createLocalShellWidget(project.basePath, tabName)
         OpenCodeTerminalLinkFilter.install(project, widget)
 
-        val virtualFile = OpenCodeTerminalVirtualFile(OPEN_CODE_TAB_NAME)
+        val virtualFile = OpenCodeTerminalVirtualFile(tabName)
         terminalVirtualFile = virtualFile
         OpenCodeTerminalFileEditorProvider.registerWidget(virtualFile, widget)
 
@@ -369,7 +379,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             
             if (terminalEditor != null) {
                 // Use --continue to load the most recent session if available
-                val command = "opencode --hostname $host --port $port --continue"
+                val command = buildOpenCodeCommand(host, port, password, continueSession)
                 widget.executeCommand(command)
                 
                 // Pin the tab to keep it on the left (IntelliJ default behavior for pinned tabs)
@@ -378,6 +388,38 @@ class OpenCodeService(private val project: Project) : Disposable {
                 logger.error("Failed to create terminal editor")
             }
         }
+    }
+    
+    /**
+     * Build the opencode command with optional password via environment variable.
+     */
+    private fun buildOpenCodeCommand(host: String, port: Int, password: String?, continueSession: Boolean): String {
+        val continueFlag = if (continueSession) " --continue" else ""
+        val baseCommand = "opencode --hostname $host --port $port$continueFlag"
+        if (password.isNullOrBlank()) {
+            return baseCommand
+        }
+
+        return if (isWindows()) {
+            val escaped = escapeForWindowsCmd(password)
+            "cmd /c set \"OPENCODE_SERVER_PASSWORD=$escaped\" && $baseCommand"
+        } else {
+            val escaped = escapeForPosix(password)
+            "OPENCODE_SERVER_PASSWORD='$escaped' $baseCommand"
+        }
+    }
+
+    private fun escapeForWindowsCmd(value: String): String {
+        return value.replace("\"", "\\\"")
+    }
+
+    private fun escapeForPosix(value: String): String {
+        return value.replace("'", "'\\''")
+    }
+
+    private fun isWindows(): Boolean {
+        val osName = System.getProperty("os.name", "").lowercase()
+        return osName.contains("windows")
     }
     
     /**

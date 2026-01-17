@@ -15,6 +15,8 @@ A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the o
 | **Notifications** | System alert when task completes | — | — |
 | **Auto-Resume** | Restore last session on launch | — | — |
 | **Smart Links** | Clickable file paths in terminal | — | — |
+| **Auth Support** | Optional password for OpenCode server | — | — |
+| **Local Change Alert** | Warn when local edits differ from AI output | — | — |
 
 ### Feature Comparison with Claude Code
 
@@ -51,8 +53,8 @@ Open **Settings** → **Plugins** → **Marketplace** → Search "OpenCode" → 
 
 Press `Cmd+Esc` (Mac) or `Ctrl+Esc` (Win/Linux) to open the connection dialog. You can:
 
-- **Connect to existing server**: Enter `host:port` (e.g., `127.0.0.1:58052`) to connect to OpenCode Desktop or any running OpenCode server. Authentication is detected automatically.
-- **Create new terminal**: Use default `127.0.0.1:4096` to create a local OpenCode terminal session.
+- **Connect to existing server**: Enter `host:port` (e.g., `127.0.0.1:58052`) and optional password to connect to OpenCode Desktop or any running OpenCode server. Authentication is detected automatically if available.
+- **Create new terminal**: Use default `127.0.0.1:4096` to create a local OpenCode terminal session. The terminal tab will be named `OpenCode(4096)`.
 
 ![Step 1: Launch OpenCode](images/1.png)
 
@@ -88,8 +90,9 @@ When OpenCode edits files, the plugin opens a native IDE diff viewer.
 - **Chronological View**: Changes are shown in the order they were made, starting from the first modified file.
 - **Navigation**: Use **← →** arrows to switch files and **↑ ↓** arrows to jump between changes.
 - **Trigger**: The diff viewer opens automatically when OpenCode finishes a response (session idle).
-- **Accept**: Stages the file (`git add`), marking it as reviewed.
-- **Reject**: Restores file to its pre-OpenCode state using `diff.before` content. Preserves your unstaged changes and staging state.
+- **Accept**: Confirms if local edits differ, then writes AI output and stages the file.
+- **Reject**: Restores the file to the pre-OpenCode baseline (Local History fallback if needed).
+- **Local Modified**: The diff title shows `(Local Modified)` when your file differs from AI output.
 - **Auto-advance**: After accepting/rejecting, automatically opens the next pending diff.
 
 ![Diff Viewer - Accept](images/5.png)
@@ -116,7 +119,7 @@ All shortcuts are customizable via **Settings** → **Keymap** → search for "O
 
 ## Terminal Management
 
-The plugin uses a single terminal tab per project named **"OpenCode"**.
+The plugin uses a single terminal tab per project named **"OpenCode({port})"**.
 
 - Only one OpenCode terminal session per project
 - The terminal persists across plugin actions
@@ -136,7 +139,7 @@ Or download from [opencode.ai/download](https://opencode.ai/download)
 
 ### Terminal not responding
 
-Try closing the "OpenCode" terminal tab and pressing `Cmd+Esc` again to create a fresh session.
+Try closing the "OpenCode({port})" terminal tab and pressing `Cmd+Esc` again to create a fresh session.
 
 ### Shortcuts not working
 

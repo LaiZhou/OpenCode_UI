@@ -4,10 +4,12 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Dimension
+import java.awt.GridLayout
 import javax.swing.JComponent
 import javax.swing.JPanel
 
@@ -20,11 +22,20 @@ class OpenCodeConnectDialog(
     private val defaultPort: Int
 ) : DialogWrapper(project, true) {
 
+    data class ConnectionInfo(
+        val hostname: String,
+        val port: Int,
+        val password: String?
+    )
+
     private val addressField = JBTextField("0.0.0.0:$defaultPort")
+    private val passwordField = JBPasswordField()
     
     var hostname: String = "0.0.0.0"
         private set
     var port: Int = defaultPort
+        private set
+    var password: String? = null
         private set
 
     init {
@@ -36,14 +47,23 @@ class OpenCodeConnectDialog(
 
     override fun createCenterPanel(): JComponent {
         val panel = JPanel(BorderLayout(0, JBUI.scale(8)))
-        panel.preferredSize = Dimension(JBUI.scale(300), JBUI.scale(60))
-        
-        val label = JBLabel("Server address:")
+        panel.preferredSize = Dimension(JBUI.scale(300), JBUI.scale(110))
+
+        val formPanel = JPanel(GridLayout(4, 1, 0, JBUI.scale(4)))
+        val addressLabel = JBLabel("Server address:")
+        val passwordLabel = JBLabel("Server password (optional):")
+
         addressField.toolTipText = "Format: hostname:port (e.g., 0.0.0.0:4096)"
-        
-        panel.add(label, BorderLayout.NORTH)
-        panel.add(addressField, BorderLayout.CENTER)
-        
+        passwordField.toolTipText = "OPENCODE_SERVER_PASSWORD"
+        passwordField.emptyText.text = "For remote OpenCode servers"
+
+        formPanel.add(addressLabel)
+        formPanel.add(addressField)
+        formPanel.add(passwordLabel)
+        formPanel.add(passwordField)
+
+        panel.add(formPanel, BorderLayout.CENTER)
+
         return panel
     }
 
@@ -81,18 +101,22 @@ class OpenCodeConnectDialog(
         val parts = input.split(":")
         hostname = parts[0].trim()
         port = parts[1].trim().toInt()
+
+        val passwordValue = passwordField.password.concatToString().trim()
+        password = passwordValue.ifBlank { null }
+
         super.doOKAction()
     }
 
     companion object {
         /**
          * Shows the dialog and returns the result.
-         * @return Pair of (hostname, port) if user clicked Connect, null if cancelled
+         * @return ConnectionInfo if user clicked Connect, null if cancelled
          */
-        fun show(project: Project, defaultPort: Int): Pair<String, Int>? {
+        fun show(project: Project, defaultPort: Int): ConnectionInfo? {
             val dialog = OpenCodeConnectDialog(project, defaultPort)
             return if (dialog.showAndGet()) {
-                Pair(dialog.hostname, dialog.port)
+                ConnectionInfo(dialog.hostname, dialog.port, dialog.password)
             } else {
                 null
             }

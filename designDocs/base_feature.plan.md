@@ -18,9 +18,9 @@
 | Windows/Linux | `Ctrl + Esc` |
 
 **行为：**
-- 显示连接对话框，允许用户输入自定义 `host:port`（默认 `127.0.0.1:4096`）
-- **连接到已有 server**：检测并连接到 OpenCode Desktop 或其他已运行的 OpenCode server（支持自动 HTTP Basic Authentication）
-- **创建新 terminal**：若 hostname 为 localhost 且端口为默认值，则在 **Editor 区域**创建 `OpenCode` terminal tab 并启动本地 server（占用更大空间，便于 TUI 显示）
+- 显示连接对话框，允许用户输入自定义 `host:port` 和可选密码（默认 `127.0.0.1:4096`）
+- **连接到已有 server**：检测并连接到 OpenCode Desktop 或其他已运行的 OpenCode server（支持自动 HTTP Basic Authentication，可手动输入密码，并通过环境变量传递给 CLI）
+- **创建新 terminal**：若 hostname 为 localhost 且端口为默认值，则在 **Editor 区域**创建 `OpenCode({port})` terminal tab 并启动本地 server（占用更大空间，便于 TUI 显示）
 - IDE 启动时不会自动创建终端，只有用户显式触发才会启动
 
 ### 2) Add Context to Terminal（添加上下文到终端）
@@ -58,7 +58,7 @@ OpenCodeTerminalVirtualFile            # 虚拟文件，代表 Editor 中的 ter
 OpenCodeTerminalFileEditor             # FileEditor 实现，包装 terminal widget
 OpenCodeTerminalFileEditorProvider     # FileEditorProvider，管理 terminal editor 创建
 
-OpenCodeConnectDialog                  # 连接对话框（输入 host:port）
+OpenCodeConnectDialog                  # 连接对话框（输入 host:port + 可选密码）
 ProcessAuthDetector                    # 自动检测 OpenCode Desktop 认证信息
 OpenCodeApiClient                      # HTTP API 客户端（支持 Basic Auth）
 SseEventListener                       # SSE 事件监听（支持 Basic Auth）
@@ -159,7 +159,7 @@ src/main/resources/META-INF/plugin.xml
 
 ## 验证用例
 
-1. 按 `Cmd+Esc` / `Ctrl+Esc`：在 Editor 区域创建或聚焦 `OpenCode` 终端 tab
+1. 按 `Cmd+Esc` / `Ctrl+Esc`：在 Editor 区域创建或聚焦 `OpenCode({port})` 终端 tab
 2. Editor 无选区按 `Opt+Cmd+K`：插入 `@current-file`
 3. Editor 有选区按 `Opt+Cmd+K`：插入 `@current-file#Lx-y`
 4. Project View 选中多个文件/目录按 `Opt+Cmd+K`：插入多个 `@path`

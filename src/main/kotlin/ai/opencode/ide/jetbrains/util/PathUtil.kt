@@ -10,6 +10,20 @@ object PathUtil {
         return FileUtil.toSystemIndependentName(path)
     }
 
+    fun toOpenCodeServerPath(path: String): String {
+        val normalized = FileUtil.toSystemIndependentName(path)
+        return if (isWindows()) {
+            normalized.replace("/", "\\")
+        } else {
+            normalized
+        }
+    }
+
+    private fun isWindows(): Boolean {
+        val osName = System.getProperty("os.name", "").lowercase()
+        return osName.contains("windows")
+    }
+
     fun resolveProjectPath(project: Project, filePath: String): String? {
         return resolveToSystemIndependentPath(project.basePath, filePath)
     }

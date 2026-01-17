@@ -1,6 +1,7 @@
 package ai.opencode.ide.jetbrains.api
 
 import ai.opencode.ide.jetbrains.api.models.*
+import ai.opencode.ide.jetbrains.util.PathUtil
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
@@ -46,13 +47,15 @@ class OpenCodeApiClient(
         .create()
 
     fun getSessions(directory: String): List<Session> {
-        val url = "$baseUrl/session?directory=${encode(directory)}"
+        val serverPath = PathUtil.toOpenCodeServerPath(directory)
+        val url = "$baseUrl/session?directory=${encode(serverPath)}"
         val type = object : TypeToken<List<Session>>() {}.type
         return get(url, type) ?: emptyList()
     }
 
     fun getSessionStatuses(directory: String): List<SessionStatus> {
-        val url = "$baseUrl/session/status?directory=${encode(directory)}"
+        val serverPath = PathUtil.toOpenCodeServerPath(directory)
+        val url = "$baseUrl/session/status?directory=${encode(serverPath)}"
         val mapType = object : TypeToken<Map<String, SessionStatusType>>() {}.type
         val map = get<Map<String, SessionStatusType>>(url, mapType) ?: return emptyList()
         return map.map { (id, statusType) -> SessionStatus(id, statusType) }
@@ -63,7 +66,8 @@ class OpenCodeApiClient(
     }
 
     fun getSessionDiff(sessionId: String, directory: String, messageId: String? = null): List<FileDiff> {
-        var url = "$baseUrl/session/$sessionId/diff?directory=${encode(directory)}"
+        val serverPath = PathUtil.toOpenCodeServerPath(directory)
+        var url = "$baseUrl/session/$sessionId/diff?directory=${encode(serverPath)}"
         if (messageId != null) url += "&messageID=$messageId"
         val type = object : TypeToken<List<FileDiff>>() {}.type
         return get(url, type) ?: emptyList()
@@ -73,7 +77,8 @@ class OpenCodeApiClient(
      * Get a specific session by ID.
      */
     fun getSession(sessionId: String, directory: String): Session? {
-        val url = "$baseUrl/session/$sessionId?directory=${encode(directory)}"
+        val serverPath = PathUtil.toOpenCodeServerPath(directory)
+        val url = "$baseUrl/session/$sessionId?directory=${encode(serverPath)}"
         return get(url, Session::class.java)
     }
 
@@ -94,7 +99,8 @@ class OpenCodeApiClient(
         onConnected: () -> Unit = {},
         onDisconnected: () -> Unit = {}
     ): SseEventListener {
-        return SseEventListener(baseUrl, directory, onEvent, onError, onConnected, onDisconnected, username, password)
+        val serverPath = PathUtil.toOpenCodeServerPath(directory)
+        return SseEventListener(baseUrl, serverPath, onEvent, onError, onConnected, onDisconnected, username, password)
     }
 
     fun tuiAppendPrompt(text: String): Boolean {

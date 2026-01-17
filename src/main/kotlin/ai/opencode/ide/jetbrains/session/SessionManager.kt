@@ -6,6 +6,7 @@ import ai.opencode.ide.jetbrains.util.PathUtil
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.OSProcessHandler
+import com.intellij.history.Label
 import com.intellij.history.LocalHistory
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -15,6 +16,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.SystemNotifications
 
@@ -55,9 +57,12 @@ class SessionManager(private val project: Project) : Disposable {
     private val processedDiffs = ConcurrentHashMap<String, String>()
 
     // Snapshot of file content captured when session becomes busy (AI starts working)
-    // Used ONLY for Reject fallback when server returns empty 'before' (server bug)
-    // Key: FilePath, Value: Content at the moment session becomes busy
+    // Used as baseline for Reject and diff context tracking
+    // Key: FilePath, Value: Content at the moment session becomes busy or updated after Accept/Reject
     private val baselineSnapshot = ConcurrentHashMap<String, String>()
+
+    // LocalHistory label captured when session becomes busy (AI starts working)
+    private var baselineLabel: Label? = null
 
     // Flag to track if the session is currently in a busy cycle
     // Used to capture baseline only once at the start of the busy cycle
@@ -122,6 +127,11 @@ class SessionManager(private val project: Project) : Disposable {
 
         entries.forEach { entry ->
             diffsByFile[entry.diff.file] = entry
+
+            if (baselineSnapshot[entry.diff.file] == null && entry.diff.before.isNotEmpty()) {
+                baselineSnapshot[entry.diff.file] = entry.diff.before
+                logger.info("[DiffReceived] Baseline set from server: ${entry.diff.file} (len=${entry.diff.before.length})")
+            }
         }
     }
 
@@ -243,11 +253,10 @@ class SessionManager(private val project: Project) : Disposable {
             // if server sends multiple 'busy' events during generation
             if (!isCurrentlyBusy) {
                 isCurrentlyBusy = true
+                // Create LocalHistory label BEFORE AI modifies files
+                baselineLabel = createLocalHistoryLabel("OpenCode Modified Before")
                 // Capture baseline snapshot BEFORE AI modifies files
-                // This is used as fallback when server returns empty 'before' (server bug)
                 captureBaselineSnapshot()
-                // Create LocalHistory label for user recovery
-                createLocalHistoryLabel("OpenCode Modified Before")
             }
         } else {
             // Check if we are transitioning from busy to idle
@@ -308,26 +317,33 @@ class SessionManager(private val project: Project) : Disposable {
      * - rejectDiff() (to restore the file)
      * 
      * Priority:
-     * 1. Server returned 'before' (normal case)
-     * 2. Baseline snapshot (captured when session became busy - handles unstaged/chinese bug)
+     * 1. Baseline snapshot (captured when session became busy or updated after Accept/Reject)
+     * 2. Server returned 'before' (normal case)
      * 3. Git HEAD (final fallback for tracked files)
      * 4. Empty string (new untracked file)
      */
     fun resolveBeforeContent(filePath: String, serverBefore: String): String {
-        // 1. Server provided content - trust it
-        if (serverBefore.isNotEmpty()) {
-            logger.info("[ResolveBefore] Using Server Content: $filePath (len=${serverBefore.length})")
-            return serverBefore
-        }
-        
-        // 2. Use baseline snapshot (captured before AI started)
+        // 1. Use baseline snapshot (captured before AI started or updated after user action)
         val baseline = baselineSnapshot[filePath]
         if (baseline != null) {
             logger.info("[ResolveBefore] Using Baseline Snapshot: $filePath (len=${baseline.length})")
             return baseline
         }
+
+        // 2. Use LocalHistory snapshot from session start
+        val localHistoryContent = loadLocalHistoryContent(filePath)
+        if (localHistoryContent != null) {
+            logger.info("[ResolveBefore] Using LocalHistory Baseline: $filePath (len=${localHistoryContent.length})")
+            return localHistoryContent
+        }
         
-        // 3. Fallback to Git HEAD for tracked files
+        // 3. Server provided content - trust it
+        if (serverBefore.isNotEmpty()) {
+            logger.info("[ResolveBefore] Using Server Content: $filePath (len=${serverBefore.length})")
+            return serverBefore
+        }
+        
+        // 4. Fallback to Git HEAD for tracked files
         val projectPath = project.basePath
         if (projectPath != null) {
             val headContent = loadGitHeadContent(filePath, projectPath)
@@ -337,11 +353,32 @@ class SessionManager(private val project: Project) : Disposable {
             }
         }
         
-        // 4. New untracked file - empty is correct
+        // 5. New untracked file - empty is correct
         logger.info("[ResolveBefore] No content found (new file): $filePath")
         return ""
     }
     
+    private fun loadLocalHistoryContent(filePath: String): String? {
+        val label = baselineLabel ?: return null
+        val absPath = toAbsolutePath(filePath) ?: return null
+        val byteContent = try {
+            label.getByteContent(absPath)
+        } catch (e: Exception) {
+            logger.warn("[ResolveBefore] LocalHistory lookup failed: $filePath", e)
+            null
+        }
+        if (byteContent == null || byteContent.isDirectory) return null
+
+        val virtualFile = LocalFileSystem.getInstance().findFileByPath(absPath)
+        val charset = virtualFile?.charset ?: Charsets.UTF_8
+        return try {
+            String(byteContent.bytes, charset)
+        } catch (e: Exception) {
+            logger.warn("[ResolveBefore] LocalHistory decode failed: $filePath", e)
+            null
+        }
+    }
+
     private fun loadGitHeadContent(filePath: String, projectPath: String): String? {
         return try {
             val commandLine = GeneralCommandLine()
@@ -401,10 +438,59 @@ class SessionManager(private val project: Project) : Disposable {
             return false
         }
         
-        // Execute git add (no LocalHistory needed - file content doesn't change)
-        val success = runGitCommand(listOf("add", filePath), projectPath)
-        
+        val absPath = toAbsolutePath(filePath)
+        if (absPath == null) {
+            logger.warn("Failed to resolve absolute path for accept: $filePath")
+            return false
+        }
+
+        val file = java.io.File(absPath)
+        val resolvedAfter = resolveEffectiveContent(entry.diff)
+        val currentContent = if (file.exists() && file.isFile) readFileContent(file) else null
+
+        if (currentContent != null && currentContent != resolvedAfter) {
+            val proceed = confirmAcceptOverwrite(filePath)
+            if (!proceed) return false
+        }
+
+        try {
+            if (resolvedAfter.isEmpty()) {
+                if (file.exists()) {
+                    if (!file.isFile) {
+                        logger.warn("Accept skipped: path is not a file: $filePath")
+                        return false
+                    }
+                    if (!file.delete()) {
+                        logger.warn("Failed to delete file during accept: $filePath")
+                        return false
+                    }
+                }
+            } else if (file.exists()) {
+                if (file.isFile) {
+                    file.writeText(resolvedAfter)
+                } else {
+                    logger.warn("Accept skipped: path is not a file: $filePath")
+                    return false
+                }
+            } else {
+                file.parentFile?.mkdirs()
+                file.writeText(resolvedAfter)
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to write accepted content for: $filePath", e)
+            return false
+        }
+
+        val gitArgs = if (resolvedAfter.isEmpty()) listOf("add", "-A", filePath) else listOf("add", filePath)
+        val success = runGitCommand(gitArgs, projectPath)
+
         if (success) {
+            if (file.exists() && file.isFile) {
+                baselineSnapshot[filePath] = readFileContent(file)
+            } else {
+                baselineSnapshot.remove(filePath)
+            }
+
             diffsByFile.remove(filePath)
             removeFileFromBatches(filePath)
             logger.info("Accepted diff for file: $filePath (git add)")
@@ -483,6 +569,7 @@ class SessionManager(private val project: Project) : Disposable {
         }
 
         if (success) {
+            baselineSnapshot[filePath] = restoreContent
             diffsByFile.remove(filePath)
             removeFileFromBatches(filePath)
             logger.info("Successfully rejected: $filePath")
@@ -490,6 +577,21 @@ class SessionManager(private val project: Project) : Disposable {
 
         refreshFiles(listOf(filePath))
         return success
+    }
+
+    private fun confirmAcceptOverwrite(filePath: String): Boolean {
+        val message = "File '$filePath' has local changes. Accepting will overwrite them with AI output. Continue?"
+        val title = "OpenCode Accept Changes"
+        val app = ApplicationManager.getApplication()
+        if (app.isDispatchThread) {
+            return Messages.showYesNoDialog(project, message, title, Messages.getWarningIcon()) == Messages.YES
+        }
+
+        var result = false
+        app.invokeAndWait {
+            result = Messages.showYesNoDialog(project, message, title, Messages.getWarningIcon()) == Messages.YES
+        }
+        return result
     }
     
     private fun showSessionCompletedNotification(sessionId: String) {
@@ -527,19 +629,23 @@ class SessionManager(private val project: Project) : Disposable {
      * Note: IntelliJ Platform only supports project-level labels, not file-level labels.
      * This allows users to recover from file modifications or destructive operations.
      */
-    private fun createLocalHistoryLabel(label: String) {
-        try {
+    private fun createLocalHistoryLabel(label: String): Label? {
+        return try {
             val app = ApplicationManager.getApplication()
-            if (app.isDispatchThread) {
+            val createdLabel = if (app.isDispatchThread) {
                 LocalHistory.getInstance().putSystemLabel(project, label)
             } else {
+                var result: Label? = null
                 app.invokeAndWait {
-                    LocalHistory.getInstance().putSystemLabel(project, label)
+                    result = LocalHistory.getInstance().putSystemLabel(project, label)
                 }
+                result
             }
             logger.debug("Created LocalHistory label: $label")
+            createdLabel
         } catch (e: Exception) {
             logger.warn("Failed to create LocalHistory label: $label", e)
+            null
         }
     }
 
@@ -737,6 +843,7 @@ class SessionManager(private val project: Project) : Disposable {
         clearDiffs()
         processedDiffs.clear()
         baselineSnapshot.clear()
+        baselineLabel = null
         activeSessionId = null
         isCurrentlyBusy = false
     }

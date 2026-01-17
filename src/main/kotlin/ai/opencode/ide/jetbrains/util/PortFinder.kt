@@ -29,31 +29,36 @@ object PortFinder {
     fun findAvailablePort(): Int {
         logger.info("Searching for available port starting from $START_PORT")
         for (port in START_PORT until START_PORT + MAX_ATTEMPTS) {
-            val portAvailable = isPortAvailable(port)
-            val openCodeRunning = isOpenCodeRunningOnPort(port)
-            
-            if (!portAvailable) {
-                logger.debug("Port $port is not available (already bound)")
-                continue
+            if (isPortAvailable(port)) {
+                logger.info("Found available port: $port")
+                return port
             }
-            
-            if (openCodeRunning) {
-                logger.debug("Port $port has OpenCode server already running")
-                continue
-            }
-            
-            logger.info("Found available port: $port")
-            return port
+            logger.debug("Port $port is not available")
         }
         throw IOException("No available port found in range $START_PORT-${START_PORT + MAX_ATTEMPTS - 1}")
     }
 
     /**
      * Checks if a specific port is available for use (not bound by any process).
+     * Checks both the default stack (often IPv6) and explicitly 127.0.0.1 (IPv4).
      */
     fun isPortAvailable(port: Int): Boolean {
-        return try {
+        // Check 1: Default stack
+        val defaultAvailable = try {
             ServerSocket(port).use { true }
+        } catch (e: IOException) {
+            false
+        }
+        
+        if (!defaultAvailable) return false
+
+        // Check 2: Explicit IPv4 localhost to catch dual-stack edge cases
+        return try {
+            java.net.ServerSocket().use { s ->
+                s.reuseAddress = false
+                s.bind(java.net.InetSocketAddress("127.0.0.1", port))
+                true
+            }
         } catch (e: IOException) {
             false
         }
@@ -86,7 +91,8 @@ object PortFinder {
             
             val responseCode = connection.responseCode
             connection.disconnect()
-            responseCode == 200
+            // 200 means healthy, 401/403 means running but requires auth. Both mean the port is occupied.
+            responseCode == 200 || responseCode == 401 || responseCode == 403
         } catch (e: Exception) {
             false
         }

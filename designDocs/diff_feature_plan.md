@@ -68,6 +68,8 @@ graph TD
 #### 1. Diff 获取与展示机制
 - **触发时机**: 监听 SSE `session.idle` 事件（AI 完成一轮输出）。
 - **数据获取**: 调用 `client.getSessionDiff()` 拉取当前 Session 的变更。
+- **展示语义**: 左侧为 AI 修改前的基准（`baselineSnapshot` / LocalHistory），右侧为 AI `after` 内容。
+- **本地修改提示**: 若当前磁盘内容与 AI `after` 不一致，Diff 标题会显示 `Local Modified` 提示。
 - **隐式接受 (Implicit Accept)**: 
   - 每次只展示**当前轮次**的新变更。
   - 通过比对 `processedDiffs` 和 `baselineSnapshot`，自动过滤掉上一轮已展示且内容未变的 Diff。
@@ -75,14 +77,14 @@ graph TD
 
 #### 2. Accept (接受变更)
 - **操作**: 用户点击 "Accept"。
-- **执行**: 插件在后台执行 `git add <file>`。
-- **效果**: 文件被暂存（Staged），从 Diff 列表中移除。此操作无损，用户可随时用 `git restore --staged` 撤销。
+- **执行**: 若磁盘内容与 AI `after` 不一致，弹出确认提示；确认后将 **AI `after` 写入磁盘**，再执行 `git add`（删除场景用 `git add -A <file>`）。
+- **效果**: 文件被暂存（Staged），从 Diff 列表中移除；`baselineSnapshot` 更新为当前磁盘内容，确保下一轮 Diff 基准正确。
 
 #### 3. Reject (拒绝变更)
 - **操作**: 用户点击 "Reject"。
 - **执行**: 恢复文件内容到 **AI 修改前** 的状态。
-- **数据源**: 优先使用服务端返回的 `diff.before`，若为空或不可靠，则回退到插件自己捕获的 **Baseline Snapshot**。
-- **效果**: 文件内容回滚，从 Diff 列表中移除。
+- **数据源**: 先用 `baselineSnapshot`，若无则用 LocalHistory Label（`OpenCode Modified Before`），再回退到 `diff.before` 或 Git HEAD。
+- **效果**: 文件内容回滚，从 Diff 列表中移除；`baselineSnapshot` 更新为恢复后的内容。
 
 ---
 
@@ -92,14 +94,14 @@ graph TD
 
 | 场景 | 文件原状态 | AI 操作 | `diff.before` | Accept 行为 | Reject 行为 |
 |------|-----------|---------|---------------|-------------|-------------|
-| **A** | 不存在 | 创建新文件 | `""` (空) | `git add` | **物理删除文件** |
-| **B** | Untracked (有内容) | 修改内容 | 原内容 | `git add` | 写回 `before` / Snapshot |
-| **C** | Tracked (Clean) | 修改内容 | HEAD 内容 | `git add` | 写回 `before` / Snapshot |
-| **D** | Tracked (Dirty) | 修改内容 | Dirty 内容 | `git add` | 写回 `before` / Snapshot |
+| **A** | 不存在 | 创建新文件 | `""` (空) | 写入 `after` -> `git add` | **物理删除文件** |
+| **B** | Untracked (有内容) | 修改内容 | 原内容 | 写入 `after` -> `git add` | 写回 `before` / Snapshot / LocalHistory |
+| **C** | Tracked (Clean) | 修改内容 | HEAD 内容 | 写入 `after` -> `git add` | 写回 `before` / Snapshot / LocalHistory |
+| **D** | Tracked (Dirty) | 修改内容 | Dirty 内容 | 写入 `after` -> `git add` | 写回 `before` / Snapshot / LocalHistory |
 
 ### 2. 快照与基准机制 (Baseline Snapshot)
 
-为了确保 Reject 操作的绝对安全，插件实现了双重保险机制：
+为了确保 Reject 操作的绝对安全，插件实现了双重保险机制，并在 Accept 时写回 AI `after`：
 
 ```mermaid
 sequenceDiagram
@@ -113,8 +115,9 @@ sequenceDiagram
     Plugin->>Git: git ls-files --others --exclude-standard (Untracked)
     Plugin->>Git: git diff --name-only (Modified)
     Plugin->>Disk: 读取所有 Dirty 文件内容
-    Plugin->>Plugin: 存入 baselineSnapshot Map
-    Plugin->>LocalHist: 创建 Label "OpenCode Modified Before"
+Plugin->>LocalHist: 创建 Label "OpenCode Modified Before"
+Plugin->>Plugin: 存入 baselineSnapshot Map
+
 
     Note over Server, Disk: 阶段 2: AI 修改文件
     Server->>Disk: 写入新代码...
@@ -126,14 +129,15 @@ sequenceDiagram
     Plugin->>Plugin: 过滤 Diff (对比 Snapshot 排除旧变更)
     Plugin->>UI: 弹出 Diff Viewer
 
-    Note over Server, Disk: 阶段 4: 用户拒绝 (Reject)
-    UI->>Plugin: Reject 点击
-    alt before 字段有效
-        Plugin->>Disk: 写入 diff.before
-    else before 字段为空 (Bug/非文本)
-        Plugin->>Disk: 写入 baselineSnapshot 中的内容
-    end
-    Plugin->>LocalHist: 创建 Label "OpenCode Rejected <file>"
+Note over Server, Disk: 阶段 4: 用户拒绝 (Reject)
+UI->>Plugin: Reject 点击
+alt baselineSnapshot / LocalHistory 有内容
+    Plugin->>Disk: 写入基准内容
+else fallback
+    Plugin->>Disk: 写入 diff.before / Git HEAD
+end
+Plugin->>LocalHist: 创建 Label "OpenCode Rejected <file>"
+
 ```
 
 ### 3. LocalHistory 保护细节
@@ -142,7 +146,7 @@ IntelliJ 的 LocalHistory 是最后的防线。插件在关键节点自动打标
 
 | 触发点 | 标签名称 | 作用 |
 |--------|----------|------|
-| **Session 开始** | `OpenCode Modified Before` | 记录 AI 动手前的干净状态 |
+| **Session 开始** | `OpenCode Modified Before` | 记录 AI 动手前的磁盘真实状态 |
 | **Session 结束** | `OpenCode Modified After` | 记录 AI 完成后的完整状态 |
 | **执行 Reject** | `OpenCode Rejected <file>` | 记录被用户拒绝掉的内容（防止误拒绝后悔） |
 
@@ -170,4 +174,4 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 **规避**:
 1. **文件名解码**: 插件通过 `FileDiffDeserializer` 自动识别并还原八进制转义序列。
 2. **内容回退**: 当 `diff.after` 为空但 `additions > 0` 时，插件自动从磁盘读取当前文件内容作为 `after` 展示。
-3. **基准回退**: Reject 时若 `diff.before` 为空，自动使用 `baselineSnapshot` 恢复。
+3. **基准回退**: Reject 时若 `diff.before` 为空，自动使用 `baselineSnapshot` / LocalHistory 恢复。

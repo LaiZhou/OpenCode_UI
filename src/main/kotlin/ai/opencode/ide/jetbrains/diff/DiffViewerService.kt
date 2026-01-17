@@ -58,8 +58,9 @@ class DiffViewerService(private val project: Project) : Disposable {
         val beforeContent = DiffContentFactory.getInstance().create(project, beforeText, fileType)
         val afterContent = DiffContentFactory.getInstance().create(project, afterText, fileType)
 
+        val titleSuffix = if (hasLocalChanges(entry)) " (Local Modified)" else ""
         val request = SimpleDiffRequest(
-            "OpenCode Diff: ${entry.diff.file}",
+            "OpenCode Diff: ${entry.diff.file}$titleSuffix",
             beforeContent,
             afterContent,
             "Original",
@@ -94,8 +95,9 @@ class DiffViewerService(private val project: Project) : Disposable {
             val beforeText = resolveBeforeContent(entry)
             val afterText = resolveAfterContent(entry)
 
+            val titleSuffix = if (hasLocalChanges(entry)) " (Local Modified)" else ""
             val request = SimpleDiffRequest(
-                title,
+                "$title$titleSuffix",
                 DiffContentFactory.getInstance().create(project, beforeText, fileType),
                 DiffContentFactory.getInstance().create(project, afterText, fileType),
                 "Original",
@@ -195,6 +197,20 @@ class DiffViewerService(private val project: Project) : Disposable {
      */
     private fun resolveBeforeContent(entry: DiffEntry): String {
         return project.service<SessionManager>().resolveBeforeContent(entry.diff.file, entry.diff.before)
+    }
+
+    private fun hasLocalChanges(entry: DiffEntry): Boolean {
+        val absolutePath = resolveAbsolutePath(entry.diff.file) ?: return false
+        val file = LocalFileSystem.getInstance().findFileByPath(absolutePath) ?: return false
+        if (!file.exists() || file.isDirectory) return false
+
+        return try {
+            val diskContent = VfsUtilCore.loadText(file)
+            val expectedContent = resolveAfterContent(entry)
+            diskContent != expectedContent
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**

@@ -44,10 +44,14 @@ intellijPlatform {
                 <li><b>Session Auto-Resume:</b> New terminals now automatically load the most recent session history.</li>
                 <li><b>Task Notification:</b> Added system notification when AI completes a task (Busy -> Idle).</li>
                 <li><b>Stability:</b> Fixed issue where moving the terminal tab caused disconnection.</li>
-                <li><b>Diff View:</b> Fixed garbled Chinese text and improved handling of unstaged files.</li>
+                <li><b>Diff View:</b> Accept now writes AI output before staging, Reject restores the AI baseline, and Local History is used as fallback.</li>
+                <li><b>Diff Alerts:</b> Shows a Local Modified label when disk content differs from AI output.</li>
                 <li><b>Input:</b> Improved prompt injection reliability using TUI API.</li>
                 <li><b>Links:</b> Added support for clickable file links (@file#Lx-y) in terminal.</li>
                 <li><b>Windows Paths:</b> Fixed path separator handling so the Diff panel opens correctly.</li>
+                <li><b>Auth:</b> Connection dialog now supports optional OpenCode server password.</li>
+                <li><b>Port Detection:</b> Improved logic to avoid suggesting ports that are already in use.</li>
+                <li><b>Terminal Tabs:</b> Terminal tab names now include the port (OpenCode(4096)).</li>
             </ul>
         """.trimIndent()
     }
