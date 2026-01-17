@@ -28,10 +28,10 @@ class OpenCodeConnectDialog(
         val password: String?
     )
 
-    private val addressField = JBTextField("0.0.0.0:$defaultPort")
+    private val addressField = JBTextField("127.0.0.1:$defaultPort")
     private val passwordField = JBPasswordField()
     
-    var hostname: String = "0.0.0.0"
+    var hostname: String = "127.0.0.1"
         private set
     var port: Int = defaultPort
         private set
@@ -53,7 +53,7 @@ class OpenCodeConnectDialog(
         val addressLabel = JBLabel("Server address:")
         val passwordLabel = JBLabel("Server password (optional):")
 
-        addressField.toolTipText = "Format: hostname:port (e.g., 0.0.0.0:4096)"
+        addressField.toolTipText = "Format: hostname:port (e.g., 127.0.0.1:4096)"
         passwordField.toolTipText = "OPENCODE_SERVER_PASSWORD"
         passwordField.emptyText.text = "For remote OpenCode servers"
 
