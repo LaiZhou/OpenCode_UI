@@ -141,6 +141,7 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 
 ### Common Pitfalls
 - **VirtualFiles vs. IoFiles**: IntelliJ uses `VirtualFile`. Use `LocalFileSystem.getInstance().findFileByIoFile()` to convert.
+- **Paths (Cross-Platform)**: Always normalize/resolve paths via `ai.opencode.ide.jetbrains.util.PathUtil`. Avoid hardcoded separators or manual `substring` logic. Ensure Windows/macOS/Linux compatibility.
 - **Read/Write Actions**: Modifying the PSI or VFS requires a Write Action (`runWriteAction`). Reading requires a Read Action.
 - **SDK Compatibility**: Ensure APIs used are available in the target version (see `build.gradle.kts`).
 

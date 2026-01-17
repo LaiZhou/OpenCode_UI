@@ -1,5 +1,7 @@
 package ai.opencode.ide.jetbrains
 
+import ai.opencode.ide.jetbrains.util.PathUtil
+
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -37,6 +39,7 @@ class SendSelectionToTerminalAction : AnAction() {
             val relativePath = file?.let { getRelativePath(project, it) }
 
             if (relativePath != null) {
+                val referencePath = formatPathReference(relativePath)
                 if (editor.selectionModel.hasSelection()) {
                     // Editor selection: only @path#Lstart-end (NO content)
                     val selectionModel = editor.selectionModel
@@ -44,17 +47,18 @@ class SendSelectionToTerminalAction : AnAction() {
                     val startLine = document.getLineNumber(selectionModel.selectionStart) + 1
                     val endLine = document.getLineNumber(selectionModel.selectionEnd) + 1
 
-                    textToSend.append("@$relativePath#L$startLine-$endLine")
+                    textToSend.append("@$referencePath#L$startLine-$endLine")
                 } else {
                     // No selection: share current file reference
-                    textToSend.append("@$relativePath")
+                    textToSend.append("@$referencePath")
                 }
             }
         } else if (virtualFiles != null && virtualFiles.isNotEmpty()) {
             // Project View selection: @path per file/directory
             for (file in virtualFiles) {
                 val relativePath = getRelativePath(project, file)
-                textToSend.append("@$relativePath ")
+                val referencePath = formatPathReference(relativePath)
+                textToSend.append("@$referencePath ")
             }
         }
 
@@ -82,12 +86,14 @@ class SendSelectionToTerminalAction : AnAction() {
     }
 
     private fun getRelativePath(project: Project, file: VirtualFile): String {
-        val projectBaseDir = project.basePath ?: return file.path
-        val filePath = file.path
-        return if (filePath.startsWith(projectBaseDir)) {
-            filePath.substring(projectBaseDir.length).removePrefix("/")
+        return PathUtil.relativizeToProject(project, file.path)
+    }
+
+    private fun formatPathReference(path: String): String {
+        return if (path.contains(" ")) {
+            "\"$path\""
         } else {
-            filePath
+            path
         }
     }
 }

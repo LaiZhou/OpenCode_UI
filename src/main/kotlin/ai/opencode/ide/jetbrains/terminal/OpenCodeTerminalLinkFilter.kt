@@ -1,5 +1,7 @@
 package ai.opencode.ide.jetbrains.terminal
 
+import ai.opencode.ide.jetbrains.util.PathUtil
+
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.ScrollType
@@ -8,16 +10,17 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+
 import com.jediterm.terminal.model.hyperlinks.HyperlinkFilter
 import com.jediterm.terminal.model.hyperlinks.LinkInfo
 import com.jediterm.terminal.model.hyperlinks.LinkResult
 import com.jediterm.terminal.model.hyperlinks.LinkResultItem
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
-import java.io.File
+
 import java.util.regex.Pattern
 
 /**
- * Jediterm hyperlink filter that makes @path and @path#Lx-y clickable in the terminal.
+ * Jediterm hyperlink filter that makes @path, @"path with spaces", and @path#Lx-y clickable in the terminal.
  * Clicking opens the file and highlights the specified line range.
  */
 class OpenCodeTerminalLinkFilter private constructor(
@@ -30,7 +33,7 @@ class OpenCodeTerminalLinkFilter private constructor(
         val items = mutableListOf<LinkResultItem>()
 
         while (matcher.find()) {
-            val rawFilePath = matcher.group(1) ?: continue
+            val rawFilePath = matcher.group(2) ?: matcher.group(3) ?: continue
             
             // Remove Jediterm wide character placeholders (U+E000)
             // Jediterm uses U+E000 as a placeholder for the second cell of wide characters (CJK)
@@ -38,8 +41,8 @@ class OpenCodeTerminalLinkFilter private constructor(
             
             logger.debug("Cleaned filePath: '$filePath' (raw: '$rawFilePath')")
             
-            val startLine = matcher.group(3)?.toIntOrNull()
-            val endLine = matcher.group(5)?.toIntOrNull() ?: startLine
+            val startLine = matcher.group(5)?.toIntOrNull()
+            val endLine = matcher.group(7)?.toIntOrNull() ?: startLine
 
             val linkInfo = LinkInfo {
                 navigateToFile(project, filePath, startLine, endLine)
@@ -83,19 +86,13 @@ class OpenCodeTerminalLinkFilter private constructor(
     }
 
     private fun resolveFile(project: Project, filePath: String): VirtualFile? {
-        val basePath = project.basePath
-        val absolutePath = if (File(filePath).isAbsolute || basePath == null) {
-            filePath
-        } else {
-            File(basePath, filePath).path
-        }
-
-        return LocalFileSystem.getInstance().findFileByPath(absolutePath)
+        val resolvedPath = PathUtil.resolveProjectPath(project, filePath) ?: return null
+        return LocalFileSystem.getInstance().findFileByPath(resolvedPath)
     }
 
     companion object {
         private val logger = Logger.getInstance(OpenCodeTerminalLinkFilter::class.java)
-        private val LINK_PATTERN = Pattern.compile("@([^\\s#]+)(#L(\\d+)(-(\\d+))?)?")
+        private val LINK_PATTERN = Pattern.compile("@(\"([^\"]+)\"|([^\\s#]+))(#L(\\d+)(-(\\d+))?)?")
 
         fun install(project: Project, widget: ShellTerminalWidget) {
             widget.addHyperlinkFilter(OpenCodeTerminalLinkFilter(project, widget))

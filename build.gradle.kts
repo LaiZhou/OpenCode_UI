@@ -47,6 +47,7 @@ intellijPlatform {
                 <li><b>Diff View:</b> Fixed garbled Chinese text and improved handling of unstaged files.</li>
                 <li><b>Input:</b> Improved prompt injection reliability using TUI API.</li>
                 <li><b>Links:</b> Added support for clickable file links (@file#Lx-y) in terminal.</li>
+                <li><b>Windows Paths:</b> Fixed path separator handling so the Diff panel opens correctly.</li>
             </ul>
         """.trimIndent()
     }

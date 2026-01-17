@@ -2,6 +2,8 @@ package ai.opencode.ide.jetbrains.diff
 
 import ai.opencode.ide.jetbrains.api.models.DiffEntry
 import ai.opencode.ide.jetbrains.session.SessionManager
+import ai.opencode.ide.jetbrains.util.PathUtil
+
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.DiffDialogHints
 import com.intellij.diff.DiffManager
@@ -9,20 +11,19 @@ import com.intellij.diff.chains.SimpleDiffRequestChain
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.diff.util.DiffUserDataKeys
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtilCore
-import java.nio.file.Paths
-
-import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.vfs.VirtualFile
+
 import java.lang.ref.WeakReference
-import com.intellij.openapi.application.ApplicationManager
 
 /**
  * Service for showing diffs using JetBrains native DiffManager.
@@ -200,21 +201,7 @@ class DiffViewerService(private val project: Project) : Disposable {
      * Convert relative path to absolute path.
      */
     private fun resolveAbsolutePath(filePath: String): String? {
-        val raw = filePath.trim()
-        if (raw.isEmpty()) return null
-
-        val basePath = project.basePath
-        return try {
-            val path = Paths.get(raw)
-            val resolved = when {
-                path.isAbsolute -> path
-                basePath != null -> Paths.get(basePath).resolve(path)
-                else -> return null
-            }
-            resolved.normalize().toString()
-        } catch (_: Exception) {
-            null
-        }
+        return PathUtil.resolveProjectPath(project, filePath)
     }
 
     private fun decorateRequest(request: SimpleDiffRequest, entry: DiffEntry) {

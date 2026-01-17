@@ -2,20 +2,22 @@ package ai.opencode.ide.jetbrains.session
 
 import ai.opencode.ide.jetbrains.api.OpenCodeApiClient
 import ai.opencode.ide.jetbrains.api.models.*
+import ai.opencode.ide.jetbrains.util.PathUtil
+
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.history.LocalHistory
-import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
-import com.intellij.ui.SystemNotifications
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
-import java.nio.file.Paths
+import com.intellij.ui.SystemNotifications
+
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -696,26 +698,7 @@ class SessionManager(private val project: Project) : Disposable {
     }
 
     private fun toAbsolutePath(filePath: String): String? {
-        var raw = filePath.trim()
-        if (raw.isEmpty()) return null
-        
-        // Remove surrounding quotes if present (Git output for paths with spaces/special chars)
-        if (raw.length >= 2 && raw.startsWith("\"") && raw.endsWith("\"")) {
-            raw = raw.substring(1, raw.length - 1)
-        }
-
-        val basePath = project.basePath
-        return try {
-            val path = Paths.get(raw)
-            val resolved = when {
-                path.isAbsolute -> path
-                basePath != null -> Paths.get(basePath).resolve(path)
-                else -> return null
-            }
-            resolved.normalize().toString()
-        } catch (_: Exception) {
-            null
-        }
+        return PathUtil.resolveProjectPath(project, filePath)
     }
 
     // ========== Internal Helpers ==========
