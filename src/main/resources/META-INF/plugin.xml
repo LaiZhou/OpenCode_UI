@@ -20,6 +20,8 @@
 
   <depends>com.intellij.modules.platform</depends>
   <depends>org.jetbrains.plugins.terminal</depends>
+  <!-- JCEF Browser Support (Optional) -->
+  <depends optional="true" config-file="opencode-web-support.xml">com.intellij.modules.jcef</depends>
 
   <actions>
     <action id="OpenCode.QuickLaunch"
@@ -62,6 +64,7 @@
 
     <!-- File Editor Provider -->
     <fileEditorProvider implementation="ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditorProvider"/>
+    <fileEditorProvider implementation="ai.opencode.ide.jetbrains.web.OpenCodeWebFileEditorProvider"/>
 
     <!-- Notifications -->
     <notificationGroup id="OpenCode" displayType="BALLOON"/>

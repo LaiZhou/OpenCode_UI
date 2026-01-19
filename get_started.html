@@ -5,14 +5,14 @@
 </p>
 
 <p>
-  <b>Download:</b> <a href="https://github.com/LaiZhou/OpenCode_UI/releases/tag/1.0.4">Get the latest version (1.0.4)</a>
+  <b>Download:</b> <a href="https://github.com/LaiZhou/OpenCode_UI/releases/tag/1.0.5">Get the latest version (1.0.5)</a>
 </p>
 
 <h2>Key Features</h2>
 <ul>
-  <li><b>Quick Launch:</b> Connect to existing OpenCode server (e.g., OpenCode Desktop) or create new terminal with a single shortcut (Cmd+Esc / Ctrl+Esc). Supports automatic authentication and optional password input. New terminal tabs are named <code>OpenCode(4096)</code>.</li>
+  <li><b>Quick Launch:</b> Connect to existing OpenCode server (e.g., OpenCode Desktop) or create new terminal with a single shortcut (Cmd+Esc / Ctrl+Esc). Supports <b>Web Interface</b> mode, automatic authentication, and optional password input. Connection settings are remembered automatically.</li>
   <li><b>Context Sharing:</b> Seamlessly send code selections or file references (with line numbers) from your editor or project view directly to the AI agent (Opt+Cmd+K).</li>
-  <li><b>Diff Review:</b> Automatically review AI-generated code changes in chronological order using a native multi-file diff viewer. Accept writes AI output and stages changes, Reject restores the AI baseline.</li>
+  <li><b>Diff Review:</b> Automatically review AI-generated code changes in chronological order. Title shows progress (e.g., "1 of 5"). Accept writes and stages changes; Reject restores the baseline. Both actions auto-advance to the next file.</li>
   <li><b>Notifications:</b> Get system-level alerts when AI tasks complete, so you can focus on other work while OpenCode runs.</li>
   <li><b>Auto-Resume:</b> New terminals automatically restore your last session context - pick up right where you left off.</li>
   <li><b>Smart Links:</b> Click file paths in the terminal (e.g., <code>@src/main.kt#L10-20</code>) to jump directly to the code.</li>
@@ -38,18 +38,18 @@
 
 <h2>Usage and Shortcuts</h2>
 <ul>
-  <li><b>Connect/Launch:</b> <code>Cmd + Esc</code> (Mac) / <code>Ctrl + Esc</code> (Win/Linux) - Opens connection dialog to connect to existing server or create new terminal (optional password supported).</li>
+  <li><b>Connect/Launch:</b> <code>Cmd + Esc</code> (Mac) / <code>Ctrl + Esc</code> (Win/Linux) - Opens connection dialog to connect to existing server or create new terminal. You can check <b>"Use Web Interface"</b> for a graphical UI.</li>
   <li><b>Add Context:</b> <code>Opt + Cmd + K</code> (Mac) / <code>Ctrl + Alt + K</code> (Win/Linux) - Sends file references/selection to the terminal.</li>
   <li><b>Review Changes:</b> When OpenCode finishes a task, a notification will appear. Click <b>Review Changes</b> to open the diff viewer (look for <code>(Local Modified)</code> if your file changed locally).</li>
 </ul>
 
 <h2>Diff Viewer Guide</h2>
 <ul>
-  <li><b>Order:</b> Diffs are presented in the order they were generated (chronological).</li>
+  <li><b>Order:</b> Diffs are presented in the order they were generated (chronological). Title shows progress (e.g., "1 of 5").</li>
   <li><b>Navigation:</b> Use <code>←</code> / <code>→</code> arrows to switch between modified files.</li>
   <li><b>Jump Changes:</b> Use <code>↑</code> / <code>↓</code> to jump between specific changes in the current file.</li>
-  <li><b>Accept:</b> Confirms if local edits differ, then writes AI output and stages the file.</li>
-  <li><b>Reject:</b> Restores the file to its pre-OpenCode baseline (Local History fallback if needed).</li>
+  <li><b>Accept:</b> Writes AI changes to disk, stages the file (git add), and auto-advances to the next file.</li>
+  <li><b>Reject:</b> Restores the file to its pre-edit state and auto-advances to the next file.</li>
   <li><b>Local Modified:</b> The diff title shows <code>(Local Modified)</code> when your file differs from AI output.</li>
 </ul>
 <p><i>The plugin automatically creates snapshots in your IDE's Local History for safety.</i></p>

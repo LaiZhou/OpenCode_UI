@@ -54,7 +54,10 @@ Open **Settings** → **Plugins** → **Marketplace** → Search "OpenCode" → 
 Press `Cmd+Esc` (Mac) or `Ctrl+Esc` (Win/Linux) to open the connection dialog. You can:
 
 - **Connect to existing server**: Enter `host:port` (e.g., `127.0.0.1:58052`) and optional password to connect to OpenCode Desktop or any running OpenCode server. Authentication is detected automatically if available.
+- **Web Interface**: Check "Use Web Interface" to open a graphical browser tab instead of a terminal.
 - **Create new terminal**: Use default `127.0.0.1:4096` to create a local OpenCode terminal session. The terminal tab will be named `OpenCode(4096)`.
+
+*Your last connection settings (address, mode, password) are remembered automatically.*
 
 ![Step 1: Launch OpenCode](images/1.png)
 
@@ -90,10 +93,10 @@ When OpenCode edits files, the plugin opens a native IDE diff viewer.
 - **Chronological View**: Changes are shown in the order they were made, starting from the first modified file.
 - **Navigation**: Use **← →** arrows to switch files and **↑ ↓** arrows to jump between changes.
 - **Trigger**: The diff viewer opens automatically when OpenCode finishes a response (session idle).
-- **Accept**: Confirms if local edits differ, then writes AI output and stages the file.
-- **Reject**: Restores the file to the pre-OpenCode baseline (Local History fallback if needed).
+- **Progress**: The title shows your review progress (e.g., `1 of 5`) for multi-file changes.
+- **Accept**: Writes the AI's changes to disk and stages the file (git add). Automatically opens the next file.
+- **Reject**: Restores the file to its state before the AI started editing. Automatically opens the next file.
 - **Local Modified**: The diff title shows `(Local Modified)` when your file differs from AI output.
-- **Auto-advance**: After accepting/rejecting, automatically opens the next pending diff.
 
 ![Diff Viewer - Accept](images/5.png)
 ![Diff Viewer - Reject](images/6.png)

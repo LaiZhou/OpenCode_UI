@@ -18,8 +18,11 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.openapi.application.runWriteAction
 import com.intellij.ui.SystemNotifications
-
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -453,33 +456,39 @@ class SessionManager(private val project: Project) : Disposable {
             if (!proceed) return false
         }
 
-        try {
-            if (resolvedAfter.isEmpty()) {
-                if (file.exists()) {
-                    if (!file.isFile) {
-                        logger.warn("Accept skipped: path is not a file: $filePath")
-                        return false
-                    }
-                    if (!file.delete()) {
-                        logger.warn("Failed to delete file during accept: $filePath")
-                        return false
+        val writeSuccess = try {
+            ApplicationManager.getApplication().invokeAndWait {
+                runWriteAction {
+                    if (resolvedAfter.isEmpty()) {
+                        val virtualFile = LocalFileSystem.getInstance().findFileByPath(absPath)
+                        if (virtualFile != null && virtualFile.exists()) {
+                            virtualFile.delete(this)
+                        }
+                    } else {
+                        val ioFile = java.io.File(absPath)
+                        if (!ioFile.exists()) {
+                            ioFile.parentFile?.mkdirs()
+                            LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile.parentFile)
+                        }
+                        
+                        val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(absPath)
+                            ?: LocalFileSystem.getInstance().findFileByIoFile(ioFile.parentFile)?.createChildData(this, ioFile.name)
+                        
+                        if (virtualFile != null) {
+                            VfsUtil.saveText(virtualFile, resolvedAfter)
+                        } else {
+                            throw java.io.IOException("Failed to create or find VirtualFile for $absPath")
+                        }
                     }
                 }
-            } else if (file.exists()) {
-                if (file.isFile) {
-                    file.writeText(resolvedAfter)
-                } else {
-                    logger.warn("Accept skipped: path is not a file: $filePath")
-                    return false
-                }
-            } else {
-                file.parentFile?.mkdirs()
-                file.writeText(resolvedAfter)
             }
+            true
         } catch (e: Exception) {
-            logger.warn("Failed to write accepted content for: $filePath", e)
+            logger.warn("Failed to write accepted content using VFS for: $filePath", e)
             return false
         }
+
+        if (!writeSuccess) return false
 
         val gitArgs = if (resolvedAfter.isEmpty()) listOf("add", "-A", filePath) else listOf("add", filePath)
         val success = runGitCommand(gitArgs, projectPath)
@@ -536,26 +545,49 @@ class SessionManager(private val project: Project) : Disposable {
         logger.info("  Git Tracked: $isTracked")
         
         val success = try {
-            val result = if (restoreContent.isNotEmpty()) {
-                // Normal case: restore to the resolved content
-                logger.info("[Reject Action] Restoring content to disk (len=${restoreContent.length})")
-                file.writeText(restoreContent)
-                true
-            } else if (!isTracked) {
-                // Untracked file with empty before = AI created this new file
-                if (entry.diff.deletions > 0) {
-                    // Safety: file had content but we lost it - refuse to delete
-                    logger.warn("[Reject Action] ABORTED: Untracked file has empty before but deletions > 0. Possible data loss risk.")
-                    false
-                } else {
-                    logger.info("[Reject Action] Deleting untracked new file")
-                    if (file.exists()) file.delete() else true
+            var result = false
+            ApplicationManager.getApplication().invokeAndWait {
+                runWriteAction {
+                    if (restoreContent.isNotEmpty()) {
+                        // Normal case: restore to the resolved content
+                        logger.info("[Reject Action] Restoring content to disk (len=${restoreContent.length})")
+                        val ioFile = java.io.File(absPath)
+                        if (!ioFile.exists()) {
+                            ioFile.parentFile?.mkdirs()
+                            LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile.parentFile)
+                        }
+                        
+                        val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(absPath)
+                            ?: LocalFileSystem.getInstance().findFileByIoFile(ioFile.parentFile)?.createChildData(this, ioFile.name)
+                            
+                        if (virtualFile != null) {
+                            VfsUtil.saveText(virtualFile, restoreContent)
+                            result = true
+                        }
+                    } else if (!isTracked) {
+                        // Untracked file with empty before = AI created this new file
+                        if (entry.diff.deletions > 0) {
+                            // Safety: file had content but we lost it - refuse to delete
+                            logger.warn("[Reject Action] ABORTED: Untracked file has empty before but deletions > 0. Possible data loss risk.")
+                            result = false
+                        } else {
+                            logger.info("[Reject Action] Deleting untracked new file")
+                            val virtualFile = LocalFileSystem.getInstance().findFileByPath(absPath)
+                            if (virtualFile != null && virtualFile.exists()) {
+                                virtualFile.delete(this)
+                            }
+                            result = true
+                        }
+                    } else {
+                        // Tracked file with truly empty original (rare but valid)
+                        logger.info("[Reject Action] Writing empty content to tracked file")
+                        val virtualFile = LocalFileSystem.getInstance().findFileByPath(absPath)
+                        if (virtualFile != null) {
+                            VfsUtil.saveText(virtualFile, "")
+                            result = true
+                        }
+                    }
                 }
-            } else {
-                // Tracked file with truly empty original (rare but valid)
-                logger.info("[Reject Action] Writing empty content to tracked file")
-                file.writeText("")
-                true
             }
             
             // Create label AFTER the operation so it marks the restored state
@@ -596,7 +628,8 @@ class SessionManager(private val project: Project) : Disposable {
     
     private fun showSessionCompletedNotification(sessionId: String) {
         val title = "OpenCode Task Completed"
-        val content = "Session $sessionId is now idle."
+        val timeStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        val content = "[$timeStr] Session $sessionId is now idle."
         
         // Ensure UI updates happen on EDT
         ApplicationManager.getApplication().invokeLater {

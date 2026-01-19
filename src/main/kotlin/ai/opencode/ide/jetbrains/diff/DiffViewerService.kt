@@ -58,9 +58,12 @@ class DiffViewerService(private val project: Project) : Disposable {
         val beforeContent = DiffContentFactory.getInstance().create(project, beforeText, fileType)
         val afterContent = DiffContentFactory.getInstance().create(project, afterText, fileType)
 
+        val total = allEntries.size.coerceAtLeast(1)
+        val currentIndex = (index + 1).coerceAtLeast(1)
         val titleSuffix = if (hasLocalChanges(entry)) " (Local Modified)" else ""
+        
         val request = SimpleDiffRequest(
-            "OpenCode Diff: ${entry.diff.file}$titleSuffix",
+            "${entry.diff.file} ($currentIndex of $total)$titleSuffix",
             beforeContent,
             afterContent,
             "Original",
@@ -87,9 +90,8 @@ class DiffViewerService(private val project: Project) : Disposable {
             val fileType = FileTypeManager.getInstance()
                 .getFileTypeByFileName(entry.diff.file)
             
-            // Simplified title: only show filename, remove confusing "(1 of N)" counter
-            // Diff window has built-in navigation, user only needs to focus on current file
-            val title = entry.diff.file
+            // Show filename and progress (e.g., "file.txt (1 of 8)")
+            val title = "${entry.diff.file} (${index + 1} of $total)"
 
             // Get diff content, fallback to disk read if server returns empty (e.g. for non-ASCII filenames)
             val beforeText = resolveBeforeContent(entry)

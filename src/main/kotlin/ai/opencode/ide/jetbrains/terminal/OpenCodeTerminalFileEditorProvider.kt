@@ -45,6 +45,10 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
             cancelDisposal(file)
         }
 
+        fun hasWidget(file: OpenCodeTerminalVirtualFile): Boolean {
+            return terminalWidgets.containsKey(file)
+        }
+
         /**
          * Schedule widget for disposal with a safety delay (5 seconds).
          * This handles the "Tab Move" scenario where a tab is closed and immediately re-opened.

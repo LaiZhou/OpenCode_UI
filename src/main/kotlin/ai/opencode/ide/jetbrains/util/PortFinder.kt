@@ -40,10 +40,19 @@ object PortFinder {
 
     /**
      * Checks if a specific port is available for use (not bound by any process).
-     * Checks both the default stack (often IPv6) and explicitly 127.0.0.1 (IPv4).
+     * Checks availability by:
+     * 1. Attempting to connect to it (If successful, it's occupied)
+     * 2. Attempting to bind a ServerSocket (Standard check)
+     * 3. Attempting to bind specifically to 127.0.0.1 (Explicit IPv4 check)
      */
     fun isPortAvailable(port: Int): Boolean {
-        // Check 1: Default stack
+        // Check 0: Try to connect. If we can connect, someone is listening.
+        // We check 127.0.0.1 as the primary target.
+        if (isPortOpen("127.0.0.1", port, timeoutMs = 100)) {
+            return false
+        }
+
+        // Check 1: Default stack (Wildcard bind)
         val defaultAvailable = try {
             ServerSocket(port).use { true }
         } catch (e: IOException) {
@@ -91,9 +100,14 @@ object PortFinder {
             
             val responseCode = connection.responseCode
             connection.disconnect()
-            // 200 means healthy, 401/403 means running but requires auth. Both mean the port is occupied.
-            responseCode == 200 || responseCode == 401 || responseCode == 403
+            
+            val isHealthy = responseCode == 200 || responseCode == 401 || responseCode == 403
+            if (!isHealthy) {
+                logger.debug("Health check failed for $hostname:$port. Response code: $responseCode")
+            }
+            isHealthy
         } catch (e: Exception) {
+            logger.debug("Health check failed for $hostname:$port. Error: ${e.message}")
             false
         }
     }
@@ -109,5 +123,53 @@ object PortFinder {
             }
         }
         return null
+    }
+
+    /**
+     * Waits for the specified port to be bound and accepting connections.
+     * @param port The port to wait for
+     * @param timeoutMs Maximum time to wait in milliseconds
+     * @return true if port became available, false if timed out
+     */
+    fun waitForPort(
+        port: Int,
+        host: String = "127.0.0.1",
+        timeoutMs: Long = 5000,
+        requireHealth: Boolean = true
+    ): Boolean {
+        logger.info("Waiting for port $host:$port (timeout=${timeoutMs}ms, requireHealth=$requireHealth)")
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            val ready = if (requireHealth) {
+                // Important: Health check implies HTTP connectivity and OpenCode readiness.
+                isOpenCodeRunningOnPort(port, host)
+            } else {
+                isPortOpen(host, port)
+            }
+
+            if (ready) {
+                logger.info("Port $host:$port is ready.")
+                return true
+            }
+            try {
+                Thread.sleep(200)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        logger.warn("Timed out waiting for port $host:$port after ${timeoutMs}ms")
+        return false
+    }
+
+    private fun isPortOpen(host: String, port: Int, timeoutMs: Int = 500): Boolean {
+        return try {
+            java.net.Socket().use { socket ->
+                socket.connect(java.net.InetSocketAddress(host, port), timeoutMs)
+                true
+            }
+        } catch (e: Exception) {
+            false
+        }
     }
 }

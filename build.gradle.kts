@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.4"
+version = "1.0.5"
 
 repositories {
     mavenCentral()
@@ -39,19 +39,13 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.4</h2>
+            <h2>1.0.5</h2>
             <ul>
-                <li><b>Session Auto-Resume:</b> New terminals now automatically load the most recent session history.</li>
-                <li><b>Task Notification:</b> Added system notification when AI completes a task (Busy -> Idle).</li>
-                <li><b>Stability:</b> Fixed issue where moving the terminal tab caused disconnection.</li>
-                <li><b>Diff View:</b> Accept now writes AI output before staging, Reject restores the AI baseline, and Local History is used as fallback.</li>
-                <li><b>Diff Alerts:</b> Shows a Local Modified label when disk content differs from AI output.</li>
-                <li><b>Input:</b> Improved prompt injection reliability using TUI API.</li>
-                <li><b>Links:</b> Added support for clickable file links (@file#Lx-y) in terminal.</li>
-                <li><b>Windows Paths:</b> Fixed path separator handling so the Diff panel opens correctly.</li>
-                <li><b>Auth:</b> Connection dialog now supports optional OpenCode server password.</li>
-                <li><b>Port Detection:</b> Improved logic to avoid suggesting ports that are already in use.</li>
-                <li><b>Terminal Tabs:</b> Terminal tab names now include the port (OpenCode(4096)).</li>
+                <li><b>Diff Progress:</b> Title now shows review progress (e.g., "1 of 5") for multi-file changes.</li>
+                <li><b>VFS Sync:</b> Improved file writing logic using VFS API for better IDE integration (Undo/Refresh).</li>
+                <li><b>Connection Persistence:</b> Remembers last used address, Web mode preference, and password.</li>
+                <li><b>Web Mode Fixes:</b> Added clipboard polyfill and improved auth header injection for smoother Web UI.</li>
+                <li><b>Auto-Advance:</b> Automatically opens the next diff after accepting or rejecting changes.</li>
             </ul>
         """.trimIndent()
     }

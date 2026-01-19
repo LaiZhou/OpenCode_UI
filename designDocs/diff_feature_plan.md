@@ -69,6 +69,7 @@ graph TD
 - **触发时机**: 监听 SSE `session.idle` 事件（AI 完成一轮输出）。
 - **数据获取**: 调用 `client.getSessionDiff()` 拉取当前 Session 的变更。
 - **展示语义**: 左侧为 AI 修改前的基准（`baselineSnapshot` / LocalHistory），右侧为 AI `after` 内容。
+- **进度提示**: Diff 窗口标题实时显示当前进度 `filename (Current of Total)`，如 `app.kt (2 of 5)`。
 - **本地修改提示**: 若当前磁盘内容与 AI `after` 不一致，Diff 标题会显示 `Local Modified` 提示。
 - **隐式接受 (Implicit Accept)**: 
   - 每次只展示**当前轮次**的新变更。
@@ -78,13 +79,15 @@ graph TD
 #### 2. Accept (接受变更)
 - **操作**: 用户点击 "Accept"。
 - **执行**: 若磁盘内容与 AI `after` 不一致，弹出确认提示；确认后将 **AI `after` 写入磁盘**，再执行 `git add`（删除场景用 `git add -A <file>`）。
-- **效果**: 文件被暂存（Staged），从 Diff 列表中移除；`baselineSnapshot` 更新为当前磁盘内容，确保下一轮 Diff 基准正确。
+- **VFS 同步**: 使用 IntelliJ VFS API (`VfsUtil.saveText` + `runWriteAction`) 写入文件，确保 IDE 实时刷新、触发索引更新并支持撤销。
+- **效果**: 文件被暂存（Staged），从 Diff 列表中移除；自动打开下一个 Diff 文件（若有）；`baselineSnapshot` 更新为当前磁盘内容，确保下一轮 Diff 基准正确。
 
 #### 3. Reject (拒绝变更)
 - **操作**: 用户点击 "Reject"。
 - **执行**: 恢复文件内容到 **AI 修改前** 的状态。
 - **数据源**: 先用 `baselineSnapshot`，若无则用 LocalHistory Label（`OpenCode Modified Before`），再回退到 `diff.before` 或 Git HEAD。
-- **效果**: 文件内容回滚，从 Diff 列表中移除；`baselineSnapshot` 更新为恢复后的内容。
+- **VFS 同步**: 使用 IntelliJ VFS API 进行恢复写入或文件删除。
+- **效果**: 文件内容回滚，从 Diff 列表中移除；自动打开下一个 Diff 文件（若有）；`baselineSnapshot` 更新为恢复后的内容。
 
 ---
 
