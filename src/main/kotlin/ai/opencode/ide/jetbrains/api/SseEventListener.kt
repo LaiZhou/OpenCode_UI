@@ -54,17 +54,21 @@ class SseEventListener(
     private val isConnected = AtomicBoolean(false)
     private val shouldReconnect = AtomicBoolean(true)
     private var reconnectTask: ScheduledFuture<*>? = null
+    private var reconnectAttemptCount = 0
 
     fun connect() {
         if (isConnected.get()) return
         shouldReconnect.set(true)
+        reconnectAttemptCount = 0
         doConnect()
     }
 
     private fun doConnect() {
+        reconnectAttemptCount++
         val encodedPath = java.net.URLEncoder.encode(projectPath, "UTF-8")
         val url = "$baseUrl/event?directory=$encodedPath"
 
+        logger.info("[SSE] Connecting to $url (attempt #$reconnectAttemptCount)...")
         val request = Request.Builder()
             .url(url)
             .header("Accept", "text/event-stream")
@@ -75,7 +79,7 @@ class SseEventListener(
         call?.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 isConnected.set(false)
-                logger.warn("[OpenCode] SSE connection failure: ${e.message}")
+                logger.warn("[SSE] Connection failure: ${e.message} (attempt #$reconnectAttemptCount)")
                 onError(e)
                 onDisconnected()
                 if (shouldReconnect.get()) scheduleReconnect()
@@ -84,7 +88,8 @@ class SseEventListener(
             override fun onResponse(call: Call, response: Response) {
                 if (!response.isSuccessful) {
                     isConnected.set(false)
-                    logger.error("[OpenCode] SSE handshake failed: HTTP ${response.code}")
+                    val body = try { response.peekBody(1024).string() } catch (_: Exception) { "no body" }
+                    logger.error("[SSE] Handshake failed: HTTP ${response.code} (attempt #$reconnectAttemptCount). Response: $body")
                     onError(IOException("SSE failed: ${response.code}"))
                     onDisconnected()
                     if (shouldReconnect.get()) scheduleReconnect()
@@ -92,8 +97,9 @@ class SseEventListener(
                 }
 
                 isConnected.set(true)
+                reconnectAttemptCount = 0
                 onConnected()
-                logger.info("[OpenCode] SSE connection established")
+                logger.info("[SSE] Connection established")
 
                 response.body?.source()?.let { source ->
                     try {
@@ -105,11 +111,14 @@ class SseEventListener(
                             }
                         }
                     } catch (e: Exception) {
-                        if (!call.isCanceled()) logger.warn("[OpenCode] SSE stream error: ${e.message}")
+                        if (!call.isCanceled()) logger.warn("[SSE] Stream interrupted: ${e.message}")
                     } finally {
                         isConnected.set(false)
                         onDisconnected()
-                        if (shouldReconnect.get() && !call.isCanceled()) scheduleReconnect()
+                        if (shouldReconnect.get() && !call.isCanceled()) {
+                            logger.info("[SSE] Connection lost. Scheduling reconnect.")
+                            scheduleReconnect()
+                        }
                     }
                 }
             }
@@ -118,10 +127,11 @@ class SseEventListener(
 
     private fun parseAndDispatchEvent(json: String) {
         try {
+            logger.debug("[SSE-Raw] $json")
             val event = gson.fromJson(json, OpenCodeEvent::class.java)
             if (event != null) onEvent(event)
         } catch (e: Exception) {
-            logger.debug("[OpenCode] SSE parse error: ${e.message}")
+            logger.debug("[SSE] Parse error: ${e.message}. JSON: $json")
         }
     }
 

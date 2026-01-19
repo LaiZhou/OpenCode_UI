@@ -140,20 +140,22 @@ class OpenCodeService(private val project: Project) : Disposable {
         
         // If we thought we were connected but server is dead, update state
         if (isConnected.get() && !isServerRunning) {
-             logger.info("Detected zombie state: isConnected=true but server is dead. Resetting.")
+             logger.info("[Connection] Detected zombie state: isConnected=true but server is dead at $hostname:$port. Resetting state.")
              isConnected.set(false)
         }
         
-        logger.info("focusOrCreateTerminal: interactive=$interactive, connected=$connected, hasUI=$hasUI, hasConfig=$hasConfig, serverRunning=$isServerRunning")
+        logger.info("[Connection] focusOrCreateTerminal: interactive=$interactive, connected=$connected, hasUI=$hasUI, hasConfig=$hasConfig, serverRunning=$isServerRunning (host=$hostname:$port)")
 
         when {
             // Case 1: Healthy Connection -> Focus UI
             connected && hasUI -> {
+                 logger.info("[Connection] Case 1: Healthy connection and UI present. Focusing.")
                  if (interactive) focusTerminalUI()
             }
 
             // Case 2: Interactive recovery (Tab closed OR Server dead)
             interactive && hasConfig -> {
+                 logger.info("[Connection] Case 2: Interactive recovery triggered. serverRunning=$isServerRunning")
                  val message = if (isServerRunning) {
                      "The OpenCode tab is closed, but the session at $hostname:$port is still active.\n\nRestore previous session?"
                  } else {
@@ -163,14 +165,26 @@ class OpenCodeService(private val project: Project) : Disposable {
             }
 
             // Case 3: Background auto-restore (only if server running)
-            !interactive && connected && !hasUI -> restoreUiForMode()
-            !interactive && !connected && isServerRunning && hasConfig -> restoreUiForMode()
+            !interactive && connected && !hasUI -> {
+                logger.info("[Connection] Case 3a: Background auto-restore UI (connected, no UI)")
+                restoreUiForMode()
+            }
+            !interactive && !connected && isServerRunning && hasConfig -> {
+                logger.info("[Connection] Case 3b: Background auto-restore UI (not connected, server running)")
+                restoreUiForMode()
+            }
 
             // Case 4: Background failure (Server dead) -> Handled by handleDisconnectedProcess/ConnectionManager
-            !interactive && !isServerRunning && hasConfig -> handleDisconnectedProcess(false)
+            !interactive && !isServerRunning && hasConfig -> {
+                logger.info("[Connection] Case 4: Background failure (server dead). Delegating to handleDisconnectedProcess.")
+                handleDisconnectedProcess(false)
+            }
 
             // Case 5: Clean slate -> Show dialog
-            else -> showConnectionDialog()
+            else -> {
+                logger.info("[Connection] Case 5: Defaulting to connection dialog. hasConfig=$hasConfig, interactive=$interactive")
+                showConnectionDialog()
+            }
         }
     }
     
@@ -339,6 +353,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         val p = port ?: return
         val pwd = password
 
+        logger.info("[Process] Restarting server in mode $mode at $host:$p")
         disconnectAndReset()
 
         this.hostname = host
@@ -349,7 +364,10 @@ class OpenCodeService(private val project: Project) : Disposable {
         when (mode) {
             ConnectionMode.WEB -> createWebTerminal(host, p, pwd)
             ConnectionMode.TERMINAL -> createLocalTerminal(host, p, pwd)
-            else -> showConnectionDialog()
+            else -> {
+                logger.warn("[Process] Unknown mode for restart: $mode. Showing dialog.")
+                showConnectionDialog()
+            }
         }
     }
 
@@ -550,36 +568,39 @@ class OpenCodeService(private val project: Project) : Disposable {
         this.lastMode = ConnectionMode.WEB
 
         try {
-            logger.info("Starting Web Mode process...")
+            logger.info("[WebMode] Starting Web Mode process for $host:$port")
             // Start background process
             val handler = startWebProcess(host, port, password, continueSession = true)
             webProcessHandler = handler
             handler.addProcessListener(object : ProcessAdapter() {
                 override fun processTerminated(event: ProcessEvent) {
-                    logger.warn("Web process terminated (exitCode=${event.exitCode})")
+                    logger.warn("[WebMode] Web process terminated (exitCode=${event.exitCode})")
                 }
 
                 override fun onTextAvailable(event: ProcessEvent, outputType: com.intellij.openapi.util.Key<*>) {
-                    logger.info("[web-process] ${event.text.trim()}")
+                    val line = event.text.trim()
+                    if (line.isNotEmpty()) {
+                        logger.info("[WebMode-Stdout] $line")
+                    }
                 }
             })
             handler.startNotify()
 
             // Move blocking wait to background
             AppExecutorUtil.getAppExecutorService().submit {
-                logger.info("Background wait for port $host:$port started on thread ${Thread.currentThread().name}")
+                logger.info("[WebMode] Waiting for port $host:$port to become ready...")
+                val startTime = System.currentTimeMillis()
                 // Increased timeout to 30s to accommodate slow startup or heavy load
                 if (PortFinder.waitForPort(port, host, timeoutMs = 30000, requireHealth = true)) {
-                    // Success: Create UI on EDT
-                    logger.info("Port $host:$port ready. Creating Web UI.")
+                    val duration = System.currentTimeMillis() - startTime
+                    logger.info("[WebMode] Port $host:$port is ready (took ${duration}ms). Creating Web UI.")
                     ApplicationManager.getApplication().invokeLater {
                          createWebUI(host, port)
                     }
                     initializeApiClient(host, port)
                     startConnectionManager()
                 } else {
-                    // Failure: Cleanup
-                    logger.warn("Port $host:$port timed out. Terminating process.")
+                    logger.warn("[WebMode] Port $host:$port timed out after 30s. Terminating process.")
                     terminateProcess()
                     ApplicationManager.getApplication().invokeLater {
                         Messages.showErrorDialog(project, "Server failed to start on port $port. Check logs for details.", "Error")
@@ -587,7 +608,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                 }
             }
         } catch (e: Exception) {
-            logger.error("Failed to start web process", e)
+            logger.error("[WebMode] Failed to start web process: ${e.message}", e)
             Messages.showErrorDialog(project, "Failed to start OpenCode server: ${e.message}", "Error")
         }
     }
@@ -621,17 +642,17 @@ class OpenCodeService(private val project: Project) : Disposable {
             cmd.environment["OPENCODE_SERVER_PASSWORD"] = password
         }
         
-        logger.info("Executing command: ${cmd.commandLineString}")
+        logger.info("[Process] Launching background process: ${cmd.commandLineString}")
         val handler = OSProcessHandler(cmd)
         
         // Add listener to detect immediate crash/termination
         handler.addProcessListener(object : ProcessAdapter() {
             override fun processTerminated(event: ProcessEvent) {
-                logger.warn("Web process terminated (exitCode=${event.exitCode})")
+                logger.warn("[Process] Background process exited: code=${event.exitCode}, message=${event.text}")
                 // If the process dies unexpectedly, ensure we update state immediately
                 // preventing the user from waiting for the next polling cycle
                 if (isConnected.get()) {
-                     handleConnectionFailure()
+                      handleConnectionFailure()
                 }
             }
         })
@@ -840,18 +861,20 @@ class OpenCodeService(private val project: Project) : Disposable {
             val client = apiClient ?: return
             val projectPath = project.basePath ?: return
             
+            logger.debug("[Connection] Checking health for $hostname:$port...")
             if (client.checkHealth(projectPath)) {
-                logger.info("Server healthy, connecting SSE")
+                logger.info("[Connection] Server $hostname:$port is healthy. Initializing SSE connection.")
                 remoteReconnectFailures = 0 // Reset failure count on success
                 remoteReconnectDialogShown = false
                 wasEverConnected = true
                 sessionManager.refreshActiveSession()
                 connectToSse()
             } else {
-                 handleConnectionFailure()
+                  logger.warn("[Connection] Health check failed for $hostname:$port (Server returned non-200 or connection refused)")
+                  handleConnectionFailure()
             }
         } catch (e: Exception) {
-            logger.debug("Connection attempt failed: ${e.message}")
+            logger.debug("[Connection] Health check exception for $hostname:$port: ${e.message}")
             handleConnectionFailure()
         } finally {
             isConnecting.set(false)
@@ -863,9 +886,11 @@ class OpenCodeService(private val project: Project) : Disposable {
         if (!wasEverConnected) return
 
         remoteReconnectFailures++
+        logger.info("[Connection] failureCount=$remoteReconnectFailures for $hostname:$port")
         // Retry logic: If failed once (approx 5s), silently retry.
         // If failed twice (approx 10s) and haven't shown dialog, show it.
         if (remoteReconnectFailures >= 2 && !remoteReconnectDialogShown) {
+            logger.warn("[Connection] Connection lost multiple times. Showing reconnect dialog.")
             remoteReconnectDialogShown = true
             showRemoteReconnectDialog()
         }

@@ -282,6 +282,9 @@ class SessionManager(private val project: Project) : Disposable {
     private fun captureBaselineSnapshot() {
         val projectPath = project.basePath ?: return
         
+        logger.info("[Baseline] Starting snapshot capture...")
+        val startTime = System.currentTimeMillis()
+
         // Use -c core.quotepath=false to ensure Chinese filenames are output as raw UTF-8, not octal escaped sequences
         val gitConfig = listOf("-c", "core.quotepath=false")
         
@@ -304,12 +307,13 @@ class SessionManager(private val project: Project) : Disposable {
                             count++
                         }
                     } catch (e: Exception) {
-                        logger.warn("Failed to capture baseline for: $filePath")
+                        logger.warn("[Baseline] Failed to capture content for: $filePath", e)
                     }
                 }
             }
         }
-        logger.info("Captured baseline snapshot: $count dirty files")
+        val duration = System.currentTimeMillis() - startTime
+        logger.info("[Baseline] Captured $count dirty files (took ${duration}ms)")
     }
 
     /**
@@ -435,42 +439,49 @@ class SessionManager(private val project: Project) : Disposable {
     fun acceptDiff(filePath: String): Boolean {
         val projectPath = project.basePath ?: return false
         
+        logger.info("[Accept] Processing: $filePath")
         val entry = diffsByFile[filePath]
         if (entry == null) {
-            logger.warn("No diff entry found for accept: $filePath")
+            logger.warn("[Accept] No diff entry found for: $filePath")
             return false
         }
         
         val absPath = toAbsolutePath(filePath)
         if (absPath == null) {
-            logger.warn("Failed to resolve absolute path for accept: $filePath")
+            logger.warn("[Accept] Failed to resolve absolute path for: $filePath")
             return false
         }
 
-        val file = java.io.File(absPath)
+        val ioFile = java.io.File(absPath)
         val resolvedAfter = resolveEffectiveContent(entry.diff)
-        val currentContent = if (file.exists() && file.isFile) readFileContent(file) else null
+        val currentContent = if (ioFile.exists() && ioFile.isFile) readFileContent(ioFile) else null
 
         if (currentContent != null && currentContent != resolvedAfter) {
+            logger.info("[Accept] Local content differs from AI output for $filePath. Asking user for confirmation.")
             val proceed = confirmAcceptOverwrite(filePath)
-            if (!proceed) return false
+            if (!proceed) {
+                logger.info("[Accept] User cancelled overwrite for $filePath")
+                return false
+            }
         }
 
         val writeSuccess = try {
             ApplicationManager.getApplication().invokeAndWait {
                 runWriteAction {
                     if (resolvedAfter.isEmpty()) {
+                        logger.info("[Accept] Deleting file via VFS: $filePath")
                         val virtualFile = LocalFileSystem.getInstance().findFileByPath(absPath)
                         if (virtualFile != null && virtualFile.exists()) {
                             virtualFile.delete(this)
                         }
                     } else {
-                        val ioFile = java.io.File(absPath)
                         if (!ioFile.exists()) {
+                            logger.info("[Accept] Creating parent directories for: $filePath")
                             ioFile.parentFile?.mkdirs()
                             LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile.parentFile)
                         }
                         
+                        logger.info("[Accept] Writing content via VFS: $filePath (len=${resolvedAfter.length})")
                         val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(absPath)
                             ?: LocalFileSystem.getInstance().findFileByIoFile(ioFile.parentFile)?.createChildData(this, ioFile.name)
                         
@@ -484,27 +495,28 @@ class SessionManager(private val project: Project) : Disposable {
             }
             true
         } catch (e: Exception) {
-            logger.warn("Failed to write accepted content using VFS for: $filePath", e)
+            logger.error("[Accept] VFS write failed for $filePath", e)
             return false
         }
 
         if (!writeSuccess) return false
 
+        logger.info("[Accept] Running 'git add' for: $filePath")
         val gitArgs = if (resolvedAfter.isEmpty()) listOf("add", "-A", filePath) else listOf("add", filePath)
         val success = runGitCommand(gitArgs, projectPath)
 
         if (success) {
-            if (file.exists() && file.isFile) {
-                baselineSnapshot[filePath] = readFileContent(file)
+            if (ioFile.exists() && ioFile.isFile) {
+                baselineSnapshot[filePath] = readFileContent(ioFile)
             } else {
                 baselineSnapshot.remove(filePath)
             }
 
             diffsByFile.remove(filePath)
             removeFileFromBatches(filePath)
-            logger.info("Accepted diff for file: $filePath (git add)")
+            logger.info("[Accept] Successfully staged: $filePath")
         } else {
-            logger.warn("Failed to accept diff for file: $filePath")
+            logger.warn("[Accept] Git command failed for: $filePath")
         }
         
         refreshFiles(listOf(filePath))
@@ -521,6 +533,7 @@ class SessionManager(private val project: Project) : Disposable {
     fun rejectDiff(filePath: String): Boolean {
         val projectPath = project.basePath ?: return false
         
+        logger.info("[Reject] Processing: $filePath")
         val entry = diffsByFile[filePath]
         if (entry == null) {
             logger.warn("[Reject] No diff entry found for file: $filePath")
@@ -533,16 +546,13 @@ class SessionManager(private val project: Project) : Disposable {
             return false
         }
         
-        val file = java.io.File(absPath)
+        val ioFile = java.io.File(absPath)
         val isTracked = runGitCommand(listOf("ls-files", "--error-unmatch", filePath), projectPath)
         
         // Use the SAME logic as Diff display - what user sees is what they get
         val restoreContent = resolveBeforeContent(filePath, entry.diff.before)
         
-        logger.info("[Reject Debug] Processing reject for: $filePath")
-        logger.info("  Restore Content Len: ${restoreContent.length}")
-        logger.info("  File Exists: ${file.exists()}")
-        logger.info("  Git Tracked: $isTracked")
+        logger.info("[Reject Debug] context: isTracked=$isTracked, restoreContentLen=${restoreContent.length}, fileExists=${ioFile.exists()}")
         
         val success = try {
             var result = false
@@ -550,8 +560,7 @@ class SessionManager(private val project: Project) : Disposable {
                 runWriteAction {
                     if (restoreContent.isNotEmpty()) {
                         // Normal case: restore to the resolved content
-                        logger.info("[Reject Action] Restoring content to disk (len=${restoreContent.length})")
-                        val ioFile = java.io.File(absPath)
+                        logger.info("[Reject Action] Restoring content via VFS: $filePath (len=${restoreContent.length})")
                         if (!ioFile.exists()) {
                             ioFile.parentFile?.mkdirs()
                             LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile.parentFile)
@@ -571,7 +580,7 @@ class SessionManager(private val project: Project) : Disposable {
                             logger.warn("[Reject Action] ABORTED: Untracked file has empty before but deletions > 0. Possible data loss risk.")
                             result = false
                         } else {
-                            logger.info("[Reject Action] Deleting untracked new file")
+                            logger.info("[Reject Action] Deleting untracked new file via VFS: $filePath")
                             val virtualFile = LocalFileSystem.getInstance().findFileByPath(absPath)
                             if (virtualFile != null && virtualFile.exists()) {
                                 virtualFile.delete(this)
@@ -580,7 +589,7 @@ class SessionManager(private val project: Project) : Disposable {
                         }
                     } else {
                         // Tracked file with truly empty original (rare but valid)
-                        logger.info("[Reject Action] Writing empty content to tracked file")
+                        logger.info("[Reject Action] Writing empty content to tracked file via VFS: $filePath")
                         val virtualFile = LocalFileSystem.getInstance().findFileByPath(absPath)
                         if (virtualFile != null) {
                             VfsUtil.saveText(virtualFile, "")
@@ -593,10 +602,11 @@ class SessionManager(private val project: Project) : Disposable {
             // Create label AFTER the operation so it marks the restored state
             if (result) {
                 createLocalHistoryLabel("OpenCode Rejected $filePath")
+                logger.info("[Reject] Successfully restored: $filePath")
             }
             result
         } catch (e: Exception) {
-            logger.warn("[Reject] Failed to reject diff for file: $filePath", e)
+            logger.error("[Reject] VFS restore failed for $filePath", e)
             false
         }
 
@@ -604,7 +614,6 @@ class SessionManager(private val project: Project) : Disposable {
             baselineSnapshot[filePath] = restoreContent
             diffsByFile.remove(filePath)
             removeFileFromBatches(filePath)
-            logger.info("Successfully rejected: $filePath")
         }
 
         refreshFiles(listOf(filePath))

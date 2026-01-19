@@ -141,39 +141,49 @@ class OpenCodeApiClient(
     }
 
     private fun <T> execute(request: Request, type: java.lang.reflect.Type): T? {
+        val startTime = System.currentTimeMillis()
         return try {
             client.newCall(request).execute().use { response ->
+                val duration = System.currentTimeMillis() - startTime
                 if (response.isSuccessful) {
+                    logger.debug("[API] Success: ${request.method} ${request.url} (took ${duration}ms)")
                     // 强制使用 UTF-8 解码，避免服务端未设置 charset 导致中文乱码或内容丢失
                     val bodyBytes = response.body?.bytes()
                     val jsonString = bodyBytes?.toString(Charsets.UTF_8)
                     gson.fromJson(jsonString, type)
                 } else {
-                    logger.warn("[OpenCode] Request failed: ${request.url} (HTTP ${response.code})")
+                    val bodyPreview = try { response.peekBody(1024).string() } catch (_: Exception) { "no body" }
+                    logger.warn("[API] Failed: ${request.method} ${request.url} (HTTP ${response.code}, took ${duration}ms). Response: $bodyPreview")
                     null
                 }
             }
         } catch (e: Exception) {
-            logger.debug("[OpenCode] Request error: ${request.url} -> ${e.message}")
+            val duration = System.currentTimeMillis() - startTime
+            logger.debug("[API] Error: ${request.method} ${request.url} -> ${e.message} (after ${duration}ms)")
             null
         }
     }
     
     private fun <T> execute(request: Request, clazz: Class<T>): T? {
+        val startTime = System.currentTimeMillis()
         return try {
             client.newCall(request).execute().use { response ->
+                val duration = System.currentTimeMillis() - startTime
                 if (response.isSuccessful) {
+                    logger.debug("[API] Success: ${request.method} ${request.url} (took ${duration}ms)")
                     // 强制使用 UTF-8 解码，避免服务端未设置 charset 导致中文乱码或内容丢失
                     val bodyBytes = response.body?.bytes()
                     val jsonString = bodyBytes?.toString(Charsets.UTF_8)
                     gson.fromJson(jsonString, clazz)
                 } else {
-                    logger.warn("[OpenCode] Request failed: ${request.url} (HTTP ${response.code})")
+                    val bodyPreview = try { response.peekBody(1024).string() } catch (_: Exception) { "no body" }
+                    logger.warn("[API] Failed: ${request.method} ${request.url} (HTTP ${response.code}, took ${duration}ms). Response: $bodyPreview")
                     null
                 }
             }
         } catch (e: Exception) {
-            logger.debug("[OpenCode] Request error: ${request.url} -> ${e.message}")
+            val duration = System.currentTimeMillis() - startTime
+            logger.debug("[API] Error: ${request.method} ${request.url} -> ${e.message} (after ${duration}ms)")
             null
         }
     }
