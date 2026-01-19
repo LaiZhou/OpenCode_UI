@@ -18,9 +18,12 @@
 | Windows/Linux | `Ctrl + Esc` |
 
 **行为：**
-- 显示连接对话框，允许用户输入自定义 `host:port` 和可选密码（默认 `127.0.0.1:4096`）
+- 显示连接对话框，允许用户输入自定义 `host:port` 和可选密码（默认 `127.0.0.1:4096`）。
+  - **WSL 提示**：若 OpenCode server 运行在 WSL，`127.0.0.1` 不可直连，需用户填写 WSL 实际 IP。
+  - **IPv6 提示**：避免使用 `localhost`，部分 Windows 环境会解析为 IPv6 导致连接失败，建议强制 `127.0.0.1`。
 - **持久化记忆**：自动保存上次连接的地址、Web 模式偏好和密码（使用 Base64 简单加密存储）
-- **连接到已有 server**：检测并连接到 OpenCode Desktop 或其他已运行的 OpenCode server（支持自动 HTTP Basic Authentication，可手动输入密码，并通过环境变量传递给 CLI）
+- **连接到已有 server**：检测并连接到 OpenCode Desktop 或其他已运行的 OpenCode server（支持自动 HTTP Basic Authentication，可手动输入密码，并通过环境变量传递给 CLI）。
+  - **进程信息读取兼容性**：Windows 可能依赖 PowerShell/WMI，Linux 读取 `/proc/{pid}/environ` 可能受权限限制；失败时必须回落为手动输入密码。
 - **创建新 terminal**：若 hostname 为 localhost 且端口为默认值，则在 **Editor 区域**创建 `OpenCode({port})` terminal tab 并启动本地 server（占用更大空间，便于 TUI 显示）
 - IDE 启动时不会自动创建终端，只有用户显式触发才会启动
 
@@ -35,6 +38,7 @@
 - **Editor（有选区）**：发送 `@path#Lstart-end`（仅引用，不发送源码内容）
 - **Editor（无选区）**：发送 `@path`（当前文件引用）
 - **Project View（多选文件/目录）**：为每个条目发送 `@path`
+- **路径格式约定**：`@path` 统一使用项目相对路径与正斜杠 `/`，避免 Windows `\` 导致解析失败。
 - 若 OpenCode 终端未打开：插件会自动创建/聚焦终端，然后再插入引用（避免“无终端就没反应”的困惑）
 
 ### 3) Sidebar Icon（右侧栏图标）
@@ -182,6 +186,7 @@ src/main/resources/META-INF/plugin.xml
 ### 3. 进程与生命周期管理
 - **后台进程**:
   - Web 模式下，插件需在后台启动 `opencode` 进程（`GeneralCommandLine`），而非将其挂载到 `TerminalWidget`。
+  - **命令执行兼容性**：避免拼接命令字符串，统一使用参数化 `GeneralCommandLine`；Windows 通过 `cmd /c` 解析 PATH，Linux/macOS 直接调用 `opencode`。
   - 需自行管理进程的 `OSProcessHandler`。
 - **生命周期绑定**:
   - 当 `OpenCodeWebFileEditor` 被关闭（`deselect` / `remove`）时，需触发后台进程的销毁，防止僵尸进程。

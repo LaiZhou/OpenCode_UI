@@ -14,6 +14,7 @@ import ai.opencode.ide.jetbrains.util.PortFinder
 import ai.opencode.ide.jetbrains.web.OpenCodeWebVirtualFile
 import ai.opencode.ide.jetbrains.web.WebModeSupport
 import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.execution.process.ProcessAdapter
 import com.intellij.execution.process.ProcessEvent
@@ -561,6 +562,10 @@ class OpenCodeService(private val project: Project) : Disposable {
      * Create a new local OpenCode instance with Web UI.
      */
     private fun createWebTerminal(host: String, port: Int, password: String?) {
+        if (!ensureOpenCodeCliAvailable()) {
+            return
+        }
+
         this.hostname = host
         this.port = port
         this.username = if (password.isNullOrBlank()) null else "opencode"
@@ -603,7 +608,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                     logger.warn("[WebMode] Port $host:$port timed out after 30s. Terminating process.")
                     terminateProcess()
                     ApplicationManager.getApplication().invokeLater {
-                        Messages.showErrorDialog(project, "Server failed to start on port $port. Check logs for details.", "Error")
+                        Messages.showErrorDialog(project, buildStartupFailureMessage(port), "Error")
                     }
                 }
             }
@@ -682,6 +687,10 @@ class OpenCodeService(private val project: Project) : Disposable {
      * Create a new local OpenCode instance with terminal UI.
      */
     private fun createLocalTerminal(host: String, port: Int, password: String?) {
+        if (!ensureOpenCodeCliAvailable()) {
+            return
+        }
+
         this.hostname = host
         this.port = port
         this.username = if (password.isNullOrBlank()) null else "opencode"
@@ -702,6 +711,10 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun createTerminalUI(host: String, port: Int, password: String?, continueSession: Boolean = true) {
+        if (!ensureOpenCodeCliAvailable()) {
+            return
+        }
+
         val terminalView = TerminalView.getInstance(project)
         val tabName = "$OPEN_CODE_TAB_PREFIX($port)"
         val widget = terminalView.createLocalShellWidget(project.basePath, tabName)
@@ -762,6 +775,61 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun isWindows(): Boolean {
         val osName = System.getProperty("os.name", "").lowercase()
         return osName.contains("windows")
+    }
+
+    private fun isLinux(): Boolean {
+        val osName = System.getProperty("os.name", "").lowercase()
+        return osName.contains("linux")
+    }
+
+    private fun ensureOpenCodeCliAvailable(): Boolean {
+        if (!isWindows() && !isLinux()) {
+            return true
+        }
+
+        val commands = if (isWindows()) {
+            listOf(listOf("cmd", "/c", "where", "opencode"))
+        } else {
+            listOf(listOf("which", "opencode"), listOf("sh", "-lc", "command -v opencode"))
+        }
+
+        val available = commands.any { command ->
+            try {
+                val handler = CapturingProcessHandler(GeneralCommandLine(command))
+                val output = handler.runProcess(1500)
+                output.exitCode == 0 && output.stdout.trim().isNotEmpty()
+            } catch (e: Exception) {
+                logger.debug("OpenCode CLI lookup failed for $command: ${e.message}")
+                false
+            }
+        }
+
+        if (!available) {
+            ApplicationManager.getApplication().invokeLater {
+                Messages.showErrorDialog(
+                    project,
+                    "OpenCode CLI was not found in PATH. Install the OpenCode Terminal CLI " +
+                        "(not Desktop) and restart the IDE. Example: npm i -g opencode-ai",
+                    "OpenCode CLI Not Found"
+                )
+            }
+        }
+
+        return available
+    }
+
+    private fun buildStartupFailureMessage(port: Int): String {
+        val baseMessage = "Server failed to start on port $port. Check logs for details."
+        if (!isWindows() && !isLinux()) {
+            return baseMessage
+        }
+
+        return buildString {
+            append(baseMessage)
+            append("\n\nCommon fixes:\n")
+            append("- Ensure the OpenCode CLI is installed and on PATH.\n")
+            append("- If the server runs in WSL or a container, use its IP instead of 127.0.0.1.")
+        }
     }
     
     /**
