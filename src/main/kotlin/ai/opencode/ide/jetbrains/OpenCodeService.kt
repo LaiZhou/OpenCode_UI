@@ -229,10 +229,14 @@ class OpenCodeService(private val project: Project) : Disposable {
 
         val currentPort = port
         val client = apiClient
-        val serverRunning = if (currentPort != null) {
+        
+        // Use internal isConnected state as primary check (set by SSE connection).
+        // Fall back to health check only if apiClient exists but not yet marked connected.
+        val connected = isConnected.get()
+        val serverRunning = if (!connected && currentPort != null) {
             PortFinder.isOpenCodeRunningOnPort(currentPort, hostname, username, password)
         } else {
-            false
+            connected
         }
 
         if (client == null || currentPort == null || !serverRunning) {
@@ -247,6 +251,11 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
 
         schedulePasteAttempt(text, attempts, delayMs)
+        
+        // Focus terminal tab to let user observe the effect
+        ApplicationManager.getApplication().invokeLater {
+            focusTerminalUI()
+        }
     }
 
     /**
