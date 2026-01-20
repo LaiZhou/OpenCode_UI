@@ -31,6 +31,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.concurrency.AppExecutorUtil
+import org.jetbrains.plugins.terminal.ShellTerminalWidget
 import org.jetbrains.plugins.terminal.TerminalView
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ScheduledFuture
@@ -93,7 +94,6 @@ class OpenCodeService(private val project: Project) : Disposable {
     
     // Web Mode State
     private var webVirtualFile: OpenCodeWebVirtualFile? = null
-    private var webProcessHandler: OSProcessHandler? = null
 
     // Background Tasks & Listeners
     private val connectionListeners = CopyOnWriteArrayList<(Boolean) -> Unit>()
@@ -226,8 +226,26 @@ class OpenCodeService(private val project: Project) : Disposable {
      */
     fun focusOrCreateTerminalAndPaste(text: String, attempts: Int = 20, delayMs: Long = 100L) {
         if (text.isBlank() || project.isDisposed) return
-        
-        focusOrCreateTerminal(interactive = false)
+
+        val currentPort = port
+        val client = apiClient
+        val serverRunning = if (currentPort != null) {
+            PortFinder.isOpenCodeRunningOnPort(currentPort, hostname, username, password)
+        } else {
+            false
+        }
+
+        if (client == null || currentPort == null || !serverRunning) {
+            ApplicationManager.getApplication().invokeLater {
+                Messages.showInfoMessage(
+                    project,
+                    "OpenCode is not running. Please start or connect to OpenCode first.",
+                    "OpenCode"
+                )
+            }
+            return
+        }
+
         schedulePasteAttempt(text, attempts, delayMs)
     }
 
@@ -574,22 +592,9 @@ class OpenCodeService(private val project: Project) : Disposable {
 
         try {
             logger.info("[WebMode] Starting Web Mode process for $host:$port")
-            // Start background process
-            val handler = startWebProcess(host, port, password, continueSession = true)
-            webProcessHandler = handler
-            handler.addProcessListener(object : ProcessAdapter() {
-                override fun processTerminated(event: ProcessEvent) {
-                    logger.warn("[WebMode] Web process terminated (exitCode=${event.exitCode})")
-                }
-
-                override fun onTextAvailable(event: ProcessEvent, outputType: com.intellij.openapi.util.Key<*>) {
-                    val line = event.text.trim()
-                    if (line.isNotEmpty()) {
-                        logger.info("[WebMode-Stdout] $line")
-                    }
-                }
-            })
-            handler.startNotify()
+            
+            // Launch TUI terminal as editor tab (same as Terminal mode)
+            createTerminalUI(host, port, password, continueSession = true)
 
             // Move blocking wait to background
             AppExecutorUtil.getAppExecutorService().submit {
@@ -616,53 +621,6 @@ class OpenCodeService(private val project: Project) : Disposable {
             logger.error("[WebMode] Failed to start web process: ${e.message}", e)
             Messages.showErrorDialog(project, "Failed to start OpenCode server: ${e.message}", "Error")
         }
-    }
-
-    private fun startWebProcess(host: String, port: Int, password: String?, continueSession: Boolean): OSProcessHandler {
-        // Use 'serve' command for headless execution. 
-        // The default 'opencode' command launches a TUI which requires a TTY and will hang in background.
-        val cmd = if (isWindows()) {
-            // Use cmd /c to let Windows resolve the executable (exe/cmd/bat) from PATH
-            // This supports both npm global installs (opencode.cmd) and standalone binaries (opencode.exe)
-            val commandLine = GeneralCommandLine("cmd", "/c", "opencode", "serve")
-            commandLine.addParameter("--hostname")
-            commandLine.addParameter(host)
-            commandLine.addParameter("--port")
-            commandLine.addParameter(port.toString())
-            commandLine
-        } else {
-            val commandLine = GeneralCommandLine("opencode", "serve")
-            commandLine.addParameter("--hostname")
-            commandLine.addParameter(host)
-            commandLine.addParameter("--port")
-            commandLine.addParameter(port.toString())
-            commandLine
-        }
-        
-        // Note: 'opencode serve' does not support --continue flag. 
-        // It simply serves the API; session state is managed by the client (Web UI).
-        
-        // Pass password via env var
-        if (!password.isNullOrBlank()) {
-            cmd.environment["OPENCODE_SERVER_PASSWORD"] = password
-        }
-        
-        logger.info("[Process] Launching background process: ${cmd.commandLineString}")
-        val handler = OSProcessHandler(cmd)
-        
-        // Add listener to detect immediate crash/termination
-        handler.addProcessListener(object : ProcessAdapter() {
-            override fun processTerminated(event: ProcessEvent) {
-                logger.warn("[Process] Background process exited: code=${event.exitCode}, message=${event.text}")
-                // If the process dies unexpectedly, ensure we update state immediately
-                // preventing the user from waiting for the next polling cycle
-                if (isConnected.get()) {
-                      handleConnectionFailure()
-                }
-            }
-        })
-        
-        return handler
     }
 
     private fun createWebUI(host: String, port: Int) {
@@ -1170,18 +1128,6 @@ class OpenCodeService(private val project: Project) : Disposable {
             }
         } catch (e: Exception) {
             logger.warn("Failed to terminate terminal process: ${e.message}")
-        }
-        
-        // 2. Terminate Web Background Process
-        try {
-            val handler = webProcessHandler
-            if (handler != null && !handler.isProcessTerminated) {
-                handler.destroyProcess() // Sends SIGTERM
-                // Wait briefly? OSProcessHandler usually handles async destruction
-            }
-            webProcessHandler = null
-        } catch (e: Exception) {
-            logger.warn("Failed to terminate web process: ${e.message}")
         }
     }
 }

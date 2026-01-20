@@ -15,13 +15,13 @@
 | 平台 | 快捷键 |
 |------|--------|
 | Mac | `Cmd + Esc` |
-| Windows/Linux | `Ctrl + Esc` |
+| Windows/Linux | `Ctrl + \` |
 
 **行为：**
 - 显示连接对话框，允许用户输入自定义 `host:port` 和可选密码（默认 `127.0.0.1:4096`）。
   - **WSL 提示**：若 OpenCode server 运行在 WSL，`127.0.0.1` 不可直连，需用户填写 WSL 实际 IP。
   - **IPv6 提示**：避免使用 `localhost`，部分 Windows 环境会解析为 IPv6 导致连接失败，建议强制 `127.0.0.1`。
-- **持久化记忆**：自动保存上次连接的地址、Web 模式偏好和密码（使用 Base64 简单加密存储）
+- **持久化记忆**：自动保存上次连接的地址和密码（使用 Base64 简单加密存储）
 - **连接到已有 server**：检测并连接到 OpenCode Desktop 或其他已运行的 OpenCode server（支持自动 HTTP Basic Authentication，可手动输入密码，并通过环境变量传递给 CLI）。
   - **进程信息读取兼容性**：Windows 可能依赖 PowerShell/WMI，Linux 读取 `/proc/{pid}/environ` 可能受权限限制；失败时必须回落为手动输入密码。
 - **创建新 terminal**：若 hostname 为 localhost 且端口为默认值，则在 **Editor 区域**创建 `OpenCode({port})` terminal tab 并启动本地 server（占用更大空间，便于 TUI 显示）
@@ -70,7 +70,7 @@ SseEventListener                       # SSE 事件监听（支持 Basic Auth）
 PortFinder                             # 端口检测和健康检查（支持 Basic Auth）
 
 OpenCodeToolWindowFactory              # 右侧栏图标行为
-QuickLaunchAction                      # Cmd+Esc handler
+QuickLaunchAction                      # Cmd+Esc / Ctrl+\ handler
 SendSelectionToTerminalAction          # Opt+Cmd+K handler
 
 ```
@@ -154,46 +154,14 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 ├── diff/
 ├── session/
 ├── terminal/
-│   ├── OpenCodeTerminalVirtualFile.kt
-│   ├── OpenCodeTerminalFileEditor.kt
-│   └── OpenCodeTerminalFileEditorProvider.kt
-└── util/
+├── util/
 
 src/main/resources/META-INF/plugin.xml
 ```
 
-## Web Mode 开发计划 (Web Interface)
-
-### 1. 需求与交互
-- **目标**: 提供基于浏览器的图形化交互界面，作为终端 TUI 的替代方案。
-- **入口**: `OpenCodeConnectDialog` 新增 "Use Web Interface" 复选框。
-- **行为**:
-  - 勾选 Web Mode 后，连接/启动 Server 成功时，不在 Editor 创建终端，而是创建内嵌浏览器 Tab。
-  - 浏览器自动导航至 `http://127.0.0.1:{port}`。
-  - Tab 标题格式建议: `OpenCode Web({port})`。
-  - **鉴权注入**: 通过 CefRequestHandler 在底层拦截所有请求并注入 `Authorization: Basic ...` Header，实现无感知登录。
-  - **剪贴板兼容**: 注入 JS Polyfill 修复 JCEF 环境下 `navigator.clipboard` API 缺失导致的报错。
-
-### 2. 核心技术组件
-- **JCEF 集成**:
-  - 使用 JetBrains Chromium Embedded Framework (`JBCefBrowser`) 渲染网页。
-  - 需在 `plugin.xml` 中声明依赖 `<depends>com.intellij.modules.jcef</depends>` 以确保环境支持。
-- **Editor 实现**:
-  - `OpenCodeWebVirtualFile`: 携带 URL 信息的虚拟文件，同时存储 Session 密码用于跨类传递。
-  - `OpenCodeWebFileEditor`: 包含 `JBCefBrowser` 组件的 Editor 实现。
-  - `OpenCodeWebFileEditorProvider`: 注册并管理 Web Editor 生命周期。
-
-### 3. 进程与生命周期管理
-- **后台进程**:
-  - Web 模式下，插件需在后台启动 `opencode` 进程（`GeneralCommandLine`），而非将其挂载到 `TerminalWidget`。
-  - **命令执行兼容性**：避免拼接命令字符串，统一使用参数化 `GeneralCommandLine`；Windows 通过 `cmd /c` 解析 PATH，Linux/macOS 直接调用 `opencode`。
-  - 需自行管理进程的 `OSProcessHandler`。
-- **生命周期绑定**:
-  - 当 `OpenCodeWebFileEditor` 被关闭（`deselect` / `remove`）时，需触发后台进程的销毁，防止僵尸进程。
-
 ## 验证用例
 
-1. 按 `Cmd+Esc` / `Ctrl+Esc`：在 Editor 区域创建或聚焦 `OpenCode({port})` 终端 tab
+1. 按 `Cmd+Esc` / `Ctrl+\`：在 Editor 区域创建或聚焦 `OpenCode({port})` 终端 tab
 2. Editor 无选区按 `Opt+Cmd+K`：插入 `@current-file`
 3. Editor 有选区按 `Opt+Cmd+K`：插入 `@current-file#Lx-y`
 4. Project View 选中多个文件/目录按 `Opt+Cmd+K`：插入多个 `@path`

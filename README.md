@@ -9,7 +9,7 @@ A JetBrains IDE plugin that integrates [OpenCode](https://opencode.ai) — the o
 
 | Feature | Description | Shortcut (Mac) | Shortcut (Win/Linux) |
 |---------|-------------|----------------|----------------------|
-| **Quick Launch** | Connect to existing OpenCode server or create new terminal | `Cmd + Esc` | `Ctrl + Esc` |
+| **Quick Launch** | Connect to existing OpenCode server or create new terminal | `Cmd + Esc` | `Ctrl + \` |
 | **Add to Terminal** | Send current file/selection or selected files to OpenCode | `Opt + Cmd + K` | `Ctrl + Alt + K` |
 | **Diff Review** | View diffs and accept/reject changes in IDE | — | — |
 | **Notifications** | System alert when task completes | — | — |
@@ -51,10 +51,9 @@ Open **Settings** → **Plugins** → **Marketplace** → Search "OpenCode" → 
 
 ### 1. Launch OpenCode Terminal
 
-Press `Cmd+Esc` (Mac) or `Ctrl+Esc` (Win/Linux) to open the connection dialog. You can:
+Press `Cmd+Esc` (Mac) or `Ctrl+\` (Win/Linux) to open the connection dialog. You can:
 
 - **Connect to existing server**: Enter `host:port` (e.g., `127.0.0.1:58052`) and optional password to connect to OpenCode Desktop or any running OpenCode server. Authentication is detected automatically if available.
-- **Web Interface**: Check "Use Web Interface" to open a graphical browser tab instead of a terminal.
 - **Create new terminal**: Use default `127.0.0.1:4096` to create a local OpenCode terminal session. The terminal tab will be named `OpenCode(4096)`.
 
 *Your last connection settings (address, mode, password) are remembered automatically.*
@@ -117,7 +116,7 @@ All shortcuts are customizable via **Settings** → **Keymap** → search for "O
 
 | Action | Mac | Windows/Linux |
 |--------|-----|---------------|
-| Open/Focus OpenCode | `Cmd + Esc` | `Ctrl + Esc` |
+| Open/Focus OpenCode | `Cmd + Esc` | `Ctrl + \` |
 | Add to OpenCode Terminal | `Opt + Cmd + K` | `Ctrl + Alt + K` |
 
 ## Terminal Management
@@ -142,7 +141,7 @@ Or download from [opencode.ai/download](https://opencode.ai/download)
 
 ### Terminal not responding
 
-Try closing the "OpenCode({port})" terminal tab and pressing `Cmd+Esc` again to create a fresh session.
+Try closing the "OpenCode({port})" terminal tab and pressing `Cmd+Esc` or `Ctrl+\` again to create a fresh session.
 
 ### Shortcuts not working
 

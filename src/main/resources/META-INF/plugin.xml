@@ -12,7 +12,7 @@
     
     <b>Key Features:</b><br>
     <ul>
-        <li><b>Quick Launch:</b> Connect to existing OpenCode server (e.g., OpenCode Desktop) or create new terminal with <code>Cmd+Esc</code> / <code>Ctrl+Esc</code>. Supports automatic authentication and optional password input.</li>
+        <li><b>Quick Launch:</b> Connect to existing OpenCode server (e.g., OpenCode Desktop) or create new terminal with <code>Cmd+Esc</code> / <code>Ctrl+\</code>. Supports automatic authentication and optional password input.</li>
         <li><b>Context Sharing:</b> Send current file, selection, or Project View items to the agent with <code>Opt+Cmd+K</code> / <code>Ctrl+Alt+K</code>.</li>
         <li><b>Native Diff Review:</b> Review AI-generated changes in a multi-file diff viewer. Accept stages changes (<code>git add</code>), Reject restores original content. Automatic snapshots ensure you can always recover previous versions.</li>
     </ul>
@@ -30,7 +30,7 @@
             description="Open or focus the OpenCode terminal"
             icon="/icons/opencode.svg">
       <add-to-group group-id="ToolsMenu" anchor="first"/>
-      <keyboard-shortcut keymap="$default" first-keystroke="control ESCAPE"/>
+      <keyboard-shortcut keymap="$default" first-keystroke="control BACK_SLASH"/>
       <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta ESCAPE"/>
       <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta ESCAPE"/>
     </action>

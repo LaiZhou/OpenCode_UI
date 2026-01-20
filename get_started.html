@@ -10,7 +10,7 @@
 
 <h2>Key Features</h2>
 <ul>
-  <li><b>Quick Launch:</b> Connect to existing OpenCode server (e.g., OpenCode Desktop) or create new terminal with a single shortcut (Cmd+Esc / Ctrl+Esc). Supports <b>Web Interface</b> mode, automatic authentication, and optional password input. Connection settings are remembered automatically.</li>
+  <li><b>Quick Launch:</b> Connect to existing OpenCode server (e.g., OpenCode Desktop) or create new terminal with a single shortcut (Cmd+Esc / Ctrl+\). Supports automatic authentication and optional password input. Connection settings are remembered automatically.</li>
   <li><b>Context Sharing:</b> Seamlessly send code selections or file references (with line numbers) from your editor or project view directly to the AI agent (Opt+Cmd+K).</li>
   <li><b>Diff Review:</b> Automatically review AI-generated code changes in chronological order. Title shows progress (e.g., "1 of 5"). Accept writes and stages changes; Reject restores the baseline. Both actions auto-advance to the next file.</li>
   <li><b>Notifications:</b> Get system-level alerts when AI tasks complete, so you can focus on other work while OpenCode runs.</li>
@@ -33,14 +33,13 @@
   </li>
   <li><b>Ensure Git is installed:</b> The plugin uses local git commands for managing changes.</li>
   <li>Launch your IDE and ensure the plugin is enabled.</li>
-  <li>Press <code>Cmd + Esc</code> (Mac) or <code>Ctrl + Esc</code> (Windows/Linux) to launch your first session.</li>
+  <li>Press <code>Cmd + Esc</code> (Mac) or <code>Ctrl + \</code> (Windows/Linux) to launch your first session.</li>
 </ol>
 
 <h2>Usage and Shortcuts</h2>
 <ul>
-  <li><b>Connect/Launch:</b> <code>Cmd + Esc</code> (Mac) / <code>Ctrl + Esc</code> (Win/Linux) - Opens connection dialog to connect to existing server or create new terminal. You can check <b>"Use Web Interface"</b> for a graphical UI.</li>
+  <li><b>Connect/Launch:</b> <code>Cmd + Esc</code> (Mac) / <code>Ctrl + \</code> (Win/Linux) - Opens connection dialog to connect to existing server or create new terminal.</li>
   <li><b>Add Context:</b> <code>Opt + Cmd + K</code> (Mac) / <code>Ctrl + Alt + K</code> (Win/Linux) - Sends file references/selection to the terminal.</li>
-  <li><b>Review Changes:</b> When OpenCode finishes a task, a notification will appear. Click <b>Review Changes</b> to open the diff viewer (look for <code>(Local Modified)</code> if your file changed locally).</li>
 </ul>
 
 <h2>Diff Viewer Guide</h2>

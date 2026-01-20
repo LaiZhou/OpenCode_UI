@@ -41,27 +41,16 @@ object PortFinder {
     /**
      * Checks if a specific port is available for use (not bound by any process).
      * Checks availability by:
-     * 1. Attempting to connect to it (If successful, it's occupied)
-     * 2. Attempting to bind a ServerSocket (Standard check)
-     * 3. Attempting to bind specifically to 127.0.0.1 (Explicit IPv4 check)
+     * 1. Attempting to connect to 127.0.0.1 (If successful, it's occupied)
+     * 2. Attempting to bind specifically to 127.0.0.1 (Explicit IPv4 check)
      */
     fun isPortAvailable(port: Int): Boolean {
-        // Check 0: Try to connect. If we can connect, someone is listening.
-        // We check 127.0.0.1 as the primary target.
+        // Check 0: Try to connect to 127.0.0.1. If we can connect, someone is listening.
         if (isPortOpen("127.0.0.1", port, timeoutMs = 100)) {
             return false
         }
 
-        // Check 1: Default stack (Wildcard bind)
-        val defaultAvailable = try {
-            ServerSocket(port).use { true }
-        } catch (e: IOException) {
-            false
-        }
-        
-        if (!defaultAvailable) return false
-
-        // Check 2: Explicit IPv4 localhost to catch dual-stack edge cases
+        // Check 1: Explicit IPv4 localhost bind check
         return try {
             java.net.ServerSocket().use { s ->
                 s.reuseAddress = false

@@ -1,11 +1,9 @@
 package ai.opencode.ide.jetbrains.ui
 
-import ai.opencode.ide.jetbrains.web.WebModeSupport
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
-import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextField
@@ -35,7 +33,6 @@ class OpenCodeConnectDialog(
 
     private val addressField = JBTextField("127.0.0.1:$defaultPort")
     private val passwordField = JBPasswordField()
-    private val webInterfaceCheckBox = JBCheckBox("Use Web Interface")
     
     var hostname: String = "127.0.0.1"
         private set
@@ -57,17 +54,14 @@ class OpenCodeConnectDialog(
         val panel = JPanel(BorderLayout(0, JBUI.scale(8)))
         panel.preferredSize = Dimension(JBUI.scale(300), JBUI.scale(140))
 
-        val formPanel = JPanel(GridLayout(5, 1, 0, JBUI.scale(4)))
+        val formPanel = JPanel(GridLayout(4, 1, 0, JBUI.scale(4)))
         val addressLabel = JBLabel("Server address:")
         val passwordLabel = JBLabel("Server password (optional):")
 
         // Load saved values
         val props = PropertiesComponent.getInstance()
-        val savedAddress = props.getValue(PROP_LAST_ADDRESS, "127.0.0.1:$defaultPort")
-        addressField.text = savedAddress
-        
-        val savedUseWeb = props.getBoolean(PROP_USE_WEB_INTERFACE, false)
-        webInterfaceCheckBox.isSelected = savedUseWeb
+        // Always suggest a new available port by default
+        addressField.text = "127.0.0.1:$defaultPort"
         
         // Load saved password (Base64 encoded for basic obfuscation)
         try {
@@ -83,18 +77,11 @@ class OpenCodeConnectDialog(
         addressField.toolTipText = "Format: hostname:port (e.g., 127.0.0.1:4096)"
         passwordField.toolTipText = "OPENCODE_SERVER_PASSWORD"
         passwordField.emptyText.text = "For remote OpenCode servers"
-        webInterfaceCheckBox.toolTipText = "Open internal browser instead of terminal"
-        
-        if (!WebModeSupport.isJcefSupported()) {
-            webInterfaceCheckBox.isEnabled = false
-            webInterfaceCheckBox.toolTipText = "Web interface is not supported in this IDE environment"
-        }
 
         formPanel.add(addressLabel)
         formPanel.add(addressField)
         formPanel.add(passwordLabel)
         formPanel.add(passwordField)
-        formPanel.add(webInterfaceCheckBox)
 
         panel.add(formPanel, BorderLayout.CENTER)
 
@@ -139,12 +126,11 @@ class OpenCodeConnectDialog(
         val passwordValue = passwordField.password.concatToString().trim()
         password = passwordValue.ifBlank { null }
         
-        useWebInterface = webInterfaceCheckBox.isSelected
+        useWebInterface = false
 
         // Save values for next time
         val props = PropertiesComponent.getInstance()
         props.setValue(PROP_LAST_ADDRESS, "$hostname:$port")
-        props.setValue(PROP_USE_WEB_INTERFACE, useWebInterface)
         
         // Save password (Base64 encoded for basic obfuscation)
         try {
@@ -165,7 +151,6 @@ class OpenCodeConnectDialog(
     companion object {
         private const val PROP_LAST_ADDRESS = "opencode.lastAddress"
         private const val PROP_LAST_PASSWORD = "opencode.lastPassword"
-        private const val PROP_USE_WEB_INTERFACE = "opencode.useWebInterface"
         
         /**
          * Shows the dialog and returns the result.

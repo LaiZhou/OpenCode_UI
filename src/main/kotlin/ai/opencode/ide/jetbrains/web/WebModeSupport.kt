@@ -7,6 +7,10 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.ui.jcef.JBCefApp
 
+import ai.opencode.ide.jetbrains.util.PathUtil
+
+import java.net.URLEncoder
+
 object WebModeSupport {
     
     fun isJcefSupported(): Boolean {
@@ -26,16 +30,22 @@ object WebModeSupport {
         // Sanitize host for browser connection (0.0.0.0 is not valid for browser navigation)
         val browserHost = if (host == "0.0.0.0") "127.0.0.1" else host
         
-        // Use clean URL without credentials. 
+        // Use clean URL without credentials.
         // We will inject credentials via JS Pre-Auth in OpenCodeWebFileEditor
-        val url = "http://$browserHost:$port/"
+        val directoryParam = project.basePath?.let { basePath ->
+            val serverPath = PathUtil.toOpenCodeServerPath(basePath)
+            URLEncoder.encode(serverPath, "UTF-8")
+        }
+        val url = if (directoryParam != null) {
+            "http://$browserHost:$port/?directory=$directoryParam"
+        } else {
+            "http://$browserHost:$port/"
+        }
         
         val tabName = "OpenCode Web($port)"
         // Pass password to VirtualFile so Editor can use it
         val virtualFile = OpenCodeWebVirtualFile(tabName, url)
         virtualFile.putUserData(OpenCodeWebVirtualFile.PASSWORD_KEY, password)
-
-        OpenCodeWebFileEditorProvider.registerCallback(virtualFile, onClose)
 
         OpenCodeWebFileEditorProvider.registerCallback(virtualFile, onClose)
 
