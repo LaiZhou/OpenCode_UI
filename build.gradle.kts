@@ -43,9 +43,10 @@ intellijPlatform {
             <ul>
                 <li><b>Diff Progress:</b> Title now shows review progress (e.g., "1 of 5") for multi-file changes.</li>
                 <li><b>VFS Sync:</b> Improved file writing logic using VFS API for better IDE integration (Undo/Refresh).</li>
-                <li><b>Connection Persistence:</b> Remembers last used address, Web mode preference, and password.</li>
-                <li><b>Web Mode Fixes:</b> Added clipboard polyfill and improved auth header injection for smoother Web UI.</li>
+                <li><b>Connection Persistence:</b> Remembers last used address and password. Always suggests a fresh available port.</li>
+                <li><b>Windows Shortcut Fix:</b> Changed Quick Launch shortcut to <code>Ctrl + \</code> on Windows to avoid conflict with Start Menu.</li>
                 <li><b>Auto-Advance:</b> Automatically opens the next diff after accepting or rejecting changes.</li>
+                <li><b>Robust Connectivity:</b> Added health checks before context sharing to prevent accidental local process spawning.</li>
             </ul>
         """.trimIndent()
     }
