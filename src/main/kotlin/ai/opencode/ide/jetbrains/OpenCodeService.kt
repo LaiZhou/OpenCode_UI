@@ -227,19 +227,16 @@ class OpenCodeService(private val project: Project) : Disposable {
     fun focusOrCreateTerminalAndPaste(text: String, attempts: Int = 20, delayMs: Long = 100L) {
         if (text.isBlank() || project.isDisposed) return
 
-        val currentPort = port
         val client = apiClient
+        val widget = terminalEditor?.terminalWidget
         
-        // Use internal isConnected state as primary check (set by SSE connection).
-        // Fall back to health check only if apiClient exists but not yet marked connected.
-        val connected = isConnected.get()
-        val serverRunning = if (!connected && currentPort != null) {
-            PortFinder.isOpenCodeRunningOnPort(currentPort, hostname, username, password)
-        } else {
-            connected
-        }
-
-        if (client == null || currentPort == null || !serverRunning) {
+        // We can proceed if we have ANY means to send the text:
+        // 1. API client exists (can try TUI API)
+        // 2. Terminal widget exists (can try direct TTY)
+        // Only show error if we have no connection mechanism at all
+        val canAttemptPaste = client != null || widget != null
+        
+        if (!canAttemptPaste) {
             ApplicationManager.getApplication().invokeLater {
                 Messages.showInfoMessage(
                     project,
@@ -1060,7 +1057,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun processDiffs(sessionId: String, diffs: List<FileDiff>) {
         sessionManager.clearDiffs()
         val newDiffs = sessionManager.filterNewDiffs(diffs)
-        sessionManager.updateProcessedDiffs(diffs)
+        sessionManager.updateProcessedDiffs(newDiffs)
         
         if (newDiffs.isNotEmpty()) {
             val entries = newDiffs.map { DiffEntry(sessionId, null, null, it, System.currentTimeMillis()) }

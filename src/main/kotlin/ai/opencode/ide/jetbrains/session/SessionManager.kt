@@ -147,12 +147,21 @@ class SessionManager(private val project: Project) : Disposable {
         logger.info("[Diff Filter] Server returned ${diffs.size} diffs, checking for duplicates...")
         
         val result = diffs.filter { diff ->
+            // Resolve effective 'after' content (handle server bug where chinese file content is empty)
+            val effectiveAfter = resolveEffectiveContent(diff)
+            // Resolve effective 'before' content using the same logic as DiffViewer
+            val effectiveBefore = resolveBeforeContent(diff.file, diff.before)
+            
+            // Early exit: Skip if before == after (no actual change)
+            if (effectiveBefore == effectiveAfter) {
+                logger.info("[Diff Filter] DECISION: SKIP (before == after, no actual change)")
+                logger.info("  File: ${diff.file}, Content length: ${effectiveAfter.length}")
+                return@filter false
+            }
+            
             val lastContent = processedDiffs[diff.file]
             val isFirstTime = lastContent == null
             val baseline = baselineSnapshot[diff.file]
-            
-            // Resolve effective 'after' content (handle server bug where chinese file content is empty)
-            val effectiveAfter = resolveEffectiveContent(diff)
             
             // Detailed Debug Logging
             logger.info("[Diff Debug] Checking file: ${diff.file}")
