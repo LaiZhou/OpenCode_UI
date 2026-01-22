@@ -2,8 +2,6 @@ package ai.opencode.ide.jetbrains.diff
 
 import ai.opencode.ide.jetbrains.api.models.DiffEntry
 import ai.opencode.ide.jetbrains.session.SessionManager
-import ai.opencode.ide.jetbrains.util.PathUtil
-
 import com.intellij.diff.DiffContentFactory
 import com.intellij.diff.DiffDialogHints
 import com.intellij.diff.DiffManager
@@ -19,8 +17,6 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.LocalFileSystem
-import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
 
 import java.lang.ref.WeakReference
@@ -60,10 +56,9 @@ class DiffViewerService(private val project: Project) : Disposable {
 
         val total = allEntries.size.coerceAtLeast(1)
         val currentIndex = (index + 1).coerceAtLeast(1)
-        val titleSuffix = if (hasLocalChanges(entry)) " (Local Modified)" else ""
-        
+
         val request = SimpleDiffRequest(
-            "${entry.diff.file} ($currentIndex of $total)$titleSuffix",
+            "${entry.diff.file} ($currentIndex of $total)",
             beforeContent,
             afterContent,
             "Original",
@@ -93,13 +88,11 @@ class DiffViewerService(private val project: Project) : Disposable {
             // Show filename and progress (e.g., "file.txt (1 of 8)")
             val title = "${entry.diff.file} (${index + 1} of $total)"
 
-            // Get diff content, fallback to disk read if server returns empty (e.g. for non-ASCII filenames)
             val beforeText = resolveBeforeContent(entry)
             val afterText = resolveAfterContent(entry)
 
-            val titleSuffix = if (hasLocalChanges(entry)) " (Local Modified)" else ""
             val request = SimpleDiffRequest(
-                "$title$titleSuffix",
+                title,
                 DiffContentFactory.getInstance().create(project, beforeText, fileType),
                 DiffContentFactory.getInstance().create(project, afterText, fileType),
                 "Original",
@@ -160,35 +153,9 @@ class DiffViewerService(private val project: Project) : Disposable {
 
     /**
      * Get diff after content.
-     * If server returns empty but additions > 0 (server bug), fallback to reading from disk.
      */
     private fun resolveAfterContent(entry: DiffEntry): String {
-        val afterText = entry.diff.after
-        
-        // If after has content, return directly
-        if (afterText.isNotEmpty()) {
-            return afterText
-        }
-        
-        // If after is empty but additions > 0, server didn't return content correctly, try loading from disk
-        if (entry.diff.additions > 0) {
-            logger.info("[OpenCode] Server returned empty 'after' for ${entry.diff.file} (additions=${entry.diff.additions}), loading from disk")
-            val absolutePath = resolveAbsolutePath(entry.diff.file)
-            if (absolutePath != null) {
-                val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByPath(absolutePath)
-                if (virtualFile != null && virtualFile.exists()) {
-                    try {
-                        val diskContent = VfsUtilCore.loadText(virtualFile)
-                        logger.info("[OpenCode] Loaded ${diskContent.length} chars from disk for: ${entry.diff.file}")
-                        return diskContent
-                    } catch (e: Exception) {
-                        logger.warn("[OpenCode] Failed to load file from disk: ${entry.diff.file}", e)
-                    }
-                }
-            }
-        }
-        
-        return afterText
+        return entry.diff.after
     }
 
     /**
@@ -199,27 +166,6 @@ class DiffViewerService(private val project: Project) : Disposable {
      */
     private fun resolveBeforeContent(entry: DiffEntry): String {
         return project.service<SessionManager>().resolveBeforeContent(entry.diff.file, entry.diff.before)
-    }
-
-    private fun hasLocalChanges(entry: DiffEntry): Boolean {
-        val absolutePath = resolveAbsolutePath(entry.diff.file) ?: return false
-        val file = LocalFileSystem.getInstance().findFileByPath(absolutePath) ?: return false
-        if (!file.exists() || file.isDirectory) return false
-
-        return try {
-            val diskContent = VfsUtilCore.loadText(file)
-            val expectedContent = resolveAfterContent(entry)
-            diskContent != expectedContent
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    /**
-     * Convert relative path to absolute path.
-     */
-    private fun resolveAbsolutePath(filePath: String): String? {
-        return PathUtil.resolveProjectPath(project, filePath)
     }
 
     private fun decorateRequest(request: SimpleDiffRequest, entry: DiffEntry) {

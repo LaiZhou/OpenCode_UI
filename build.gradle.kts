@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.5"
+version = "1.0.6"
 
 repositories {
     mavenCentral()
@@ -39,14 +39,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.5</h2>
+            <h2>1.0.6</h2>
             <ul>
-                <li><b>Diff Progress:</b> Title now shows review progress (e.g., "1 of 5") for multi-file changes.</li>
-                <li><b>VFS Sync:</b> Improved file writing logic using VFS API for better IDE integration (Undo/Refresh).</li>
-                <li><b>Connection Persistence:</b> Remembers last used address and password. Always suggests a fresh available port.</li>
-                <li><b>Windows Shortcut Fix:</b> Changed Quick Launch shortcut to <code>Ctrl + \</code> on Windows to avoid conflict with Start Menu.</li>
-                <li><b>Auto-Advance:</b> Automatically opens the next diff after accepting or rejecting changes.</li>
-                <li><b>Robust Connectivity:</b> Added health checks before context sharing to prevent accidental local process spawning.</li>
+              <li>Simplified diff workflow to rely on working tree state and explicit file.edited events.</li>
+              <li>Diffs are skipped (with notice) when no file.edited events are received.</li>
+              <li>Accept action now stages disk content without overwriting files.</li>
             </ul>
         """.trimIndent()
     }

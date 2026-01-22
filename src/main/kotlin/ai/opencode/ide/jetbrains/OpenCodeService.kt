@@ -28,6 +28,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import ai.opencode.ide.jetbrains.util.PathUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.concurrency.AppExecutorUtil
@@ -101,7 +102,6 @@ class OpenCodeService(private val project: Project) : Disposable {
     private val diffFetchTriggerTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     init {
-        setupEditorListeners()
     }
 
     // ==================== Public API ====================
@@ -977,7 +977,6 @@ class OpenCodeService(private val project: Project) : Disposable {
             onConnected = {
                 logger.info("SSE connected")
                 updateConnectionState(true)
-                sessionManager.initializeBaseline()
             },
             onDisconnected = {
                 logger.info("SSE disconnected")
@@ -1057,8 +1056,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun processDiffs(sessionId: String, diffs: List<FileDiff>) {
         sessionManager.clearDiffs()
         val newDiffs = sessionManager.filterNewDiffs(diffs)
-        sessionManager.updateProcessedDiffs(newDiffs)
-        
+
         if (newDiffs.isNotEmpty()) {
             val entries = newDiffs.map { DiffEntry(sessionId, null, null, it, System.currentTimeMillis()) }
             sessionManager.onDiffReceived(DiffBatch(sessionId, null, newDiffs))
@@ -1085,12 +1083,6 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     // ==================== Cleanup ====================
-
-    private fun setupEditorListeners() {
-        // Removed fileClosed listener that caused premature disconnection.
-        // We now allow the terminal session to persist in the background even if the tab is closed.
-        // Cleanup happens in dispose() (Project close).
-    }
 
     override fun dispose() {
         disconnectAndReset()
