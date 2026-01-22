@@ -10,59 +10,6 @@
 
 插件优先使用 **本地 Git 操作** 而非服务器端的 revert API。这保持了插件在无状态模式下的弹性，并利用了 JetBrains 的 VCS 集成。
 
-### 架构图
-
-```mermaid
-graph TD
-    subgraph IDE [JetBrains IDE]
-        direction TB
-
-        subgraph Services [Project Services]
-            OCS[OpenCodeService]
-            SM[SessionManager]
-            DVS[DiffViewerService]
-            DL[DocumentListener]
-        end
-
-        subgraph UI [User Interface]
-            Term[Terminal Tab]
-            DiffView[Diff Viewer]
-        end
-
-        subgraph Data [Local State]
-            EditList[OpenCode Edited Files]
-            UserList[User Edited Files]
-            LocalHist[Local History Label]
-            VFS[Virtual File System]
-        end
-    end
-
-    subgraph Server [OpenCode Server]
-        API[API Endpoints]
-        SSE[SSE Stream]
-    end
-
-    Term -->|Start Process| Server
-    Server -->|Events| SSE
-    SSE -->|Session Status| OCS
-    OCS -->|Delegate| SM
-
-    DL -->|Track user typing| UserList
-    SM -->|Create baseline label| LocalHist
-    SM -->|Track file.edited events| EditList
-    SM -->|Fetch diffs (fallback)| API
-    API -->|Diff data| SM
-    SM -->|Show diffs| DVS
-    DVS -->|Render| DiffView
-
-    DiffView -->|Accept| SM
-    DiffView -->|Reject| SM
-
-    SM -->|git add| VFS
-    SM -->|Restore content| VFS
-    SM -->|Create label| LocalHist
-```
-
 ### Diff 流程图
 
 ```mermaid
