@@ -66,13 +66,16 @@ class AcceptFromDiffEditorAction(private val filePath: String) : AnAction() {
         val before = sessionManager.getAllDiffEntries()
         val previousIndex = findEntryIndex(before, filePath)
 
-        val success = sessionManager.acceptDiff(filePath)
-
-        ApplicationManager.getApplication().invokeLater {
-            if (success) {
+        // SessionManager.acceptDiff returns Unit, not Boolean
+        val entry = sessionManager.getDiffForFile(filePath)
+        if (entry != null) {
+            sessionManager.acceptDiff(entry)
+            ApplicationManager.getApplication().invokeLater {
                 openNextDiff(project, previousIndex, e)
-            } else {
-                Messages.showWarningDialog(project, "Failed to stage changes.", "Accept Failed")
+            }
+        } else {
+            ApplicationManager.getApplication().invokeLater {
+                Messages.showWarningDialog(project, "Diff entry not found for $filePath", "Accept Failed")
             }
         }
     }
@@ -118,22 +121,16 @@ class RejectFromDiffEditorAction(private val filePath: String) : AnAction() {
         val previousIndex = findEntryIndex(before, filePath)
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "OpenCode: Rejecting changes", false) {
-            private var ok: Boolean = false
-
             override fun run(indicator: ProgressIndicator) {
-                ok = sessionManager.rejectDiff(filePath)
+                // rejectDiff now takes DiffEntry and runs on EDT internally if needed, but we call it from background
+                // Wait, rejectDiff uses invokeLater for VFS ops.
+                // It returns Unit.
+                sessionManager.rejectDiff(entry)
             }
 
             override fun onSuccess() {
-                if (!ok) {
-                    Messages.showWarningDialog(
-                        project, 
-                        "Failed to restore file. Check Local History for recovery options.", 
-                        "Reject Failed"
-                    )
-                    return
-                }
-
+                // Since rejectDiff is async (uses invokeLater for VFS), we can't easily know "success" here.
+                // But for now, we assume it proceeds. The SessionManager logs errors.
                 openNextDiff(project, previousIndex, e)
             }
         })

@@ -119,6 +119,41 @@ data class MessagePartRemovedProperties(
 )
 
 /**
+ * Event fired when a message is updated.
+ */
+data class MessageUpdatedEvent(
+    @SerializedName("type")
+    override val type: String = "message.updated",
+    val properties: MessageUpdatedProperties
+) : OpenCodeEvent()
+
+data class MessageUpdatedProperties(
+    val info: MessageInfo
+)
+
+data class MessageInfo(
+    val id: String,
+    val sessionID: String,
+    val role: String? = null
+)
+
+/**
+ * Event fired when a command is executed.
+ */
+data class CommandExecutedEvent(
+    @SerializedName("type")
+    override val type: String = "command.executed",
+    val properties: CommandExecutedProperties
+) : OpenCodeEvent()
+
+data class CommandExecutedProperties(
+    val name: String,
+    val sessionID: String,
+    val arguments: String,
+    val messageID: String
+)
+
+/**
  * Unknown event type - for events we don't specifically handle.
  */
 data class UnknownEvent(
@@ -144,8 +179,10 @@ class OpenCodeEventDeserializer : JsonDeserializer<OpenCodeEvent> {
             "session.status" -> context.deserialize(json, SessionStatusEvent::class.java)
             "session.updated" -> context.deserialize(json, SessionUpdatedEvent::class.java)
             "file.edited" -> context.deserialize(json, FileEditedEvent::class.java)
+            "message.updated" -> context.deserialize(json, MessageUpdatedEvent::class.java)
             "message.part.updated" -> context.deserialize(json, MessagePartUpdatedEvent::class.java)
             "message.part.removed" -> context.deserialize(json, MessagePartRemovedEvent::class.java)
+            "command.executed" -> context.deserialize(json, CommandExecutedEvent::class.java)
             else -> UnknownEvent(eventType)
         }
     }
