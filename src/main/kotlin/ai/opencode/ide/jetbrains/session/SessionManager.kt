@@ -19,6 +19,10 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.application.runWriteAction
+import com.intellij.openapi.command.CommandProcessor
+import com.intellij.openapi.editor.event.DocumentEvent
+import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.ui.SystemNotifications
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -60,9 +64,36 @@ class SessionManager(private val project: Project) : Disposable {
     // Files edited by OpenCode during the current busy cycle.
     private val openCodeEditedFiles = ConcurrentHashMap<String, Boolean>()
 
+    // Files edited by the user during the current busy cycle.
+    private val userEditedFiles = ConcurrentHashMap<String, Boolean>()
+
     // Avoid spamming notifications during a single busy cycle.
     private var missingEditNoticeShown = false
 
+
+    private val documentListener = object : DocumentListener {
+        override fun documentChanged(event: DocumentEvent) {
+            if (!isCurrentlyBusy) return
+
+            val commandName = CommandProcessor.getInstance().currentCommandName
+            // If the command has a name (e.g., "Typing", "Paste"), it's likely a user action.
+            // External VFS refreshes (e.g., OpenCode agent via terminal) usually happen
+            // in a generic write action or a command without a specific user-facing name.
+            if (!commandName.isNullOrEmpty()) {
+                val file = FileDocumentManager.getInstance().getFile(event.document)
+                if (file != null) {
+                    val path = PathUtil.relativizeToProject(project, file.path)
+                    userEditedFiles[path] = true
+                    logger.info("[User Edit] Detected user modification in $path (Command: $commandName)")
+                }
+            }
+        }
+    }
+
+    init {
+        // Register the document listener
+        EditorFactory.getInstance().eventMulticaster.addDocumentListener(documentListener, this)
+    }
 
     /**
      * Set the API client for server operations.
@@ -248,6 +279,7 @@ class SessionManager(private val project: Project) : Disposable {
             if (!isCurrentlyBusy) {
                 isCurrentlyBusy = true
                 openCodeEditedFiles.clear()
+                userEditedFiles.clear()
                 missingEditNoticeShown = false
                 // Create LocalHistory label BEFORE AI modifies files
                 baselineLabel = createLocalHistoryLabel("OpenCode Modified Before")
@@ -418,6 +450,20 @@ class SessionManager(private val project: Project) : Disposable {
         if (entry == null) {
             logger.warn("[Reject] No diff entry found for file: $filePath")
             return false
+        }
+
+        // Check if user also edited this file during the busy cycle
+        if (userEditedFiles.containsKey(filePath)) {
+            val confirm = com.intellij.openapi.ui.Messages.showYesNoDialog(
+                project,
+                "You modified '$filePath' while OpenCode was working.\n\nRejecting will restore the file to its state BEFORE OpenCode started, causing you to LOSE your changes.\n\nAre you sure you want to proceed?",
+                "Warning: User Edits Detected",
+                com.intellij.openapi.ui.Messages.getWarningIcon()
+            )
+            if (confirm != com.intellij.openapi.ui.Messages.YES) {
+                logger.info("[Reject] Cancelled by user due to mixed edits warning: $filePath")
+                return false
+            }
         }
         
         val absPath = toAbsolutePath(filePath)
@@ -643,6 +689,13 @@ class SessionManager(private val project: Project) : Disposable {
         return PathUtil.resolveProjectPath(project, filePath)
     }
 
+    /**
+     * Check if a file has been edited by the user during the current busy cycle.
+     */
+    fun hasUserEdits(filePath: String): Boolean {
+        return userEditedFiles.containsKey(filePath)
+    }
+
     // ========== Internal Helpers ==========
 
     private fun removeFileFromBatches(filePath: String) {
@@ -677,6 +730,7 @@ class SessionManager(private val project: Project) : Disposable {
     fun clear() {
         clearDiffs()
         openCodeEditedFiles.clear()
+        userEditedFiles.clear()
         missingEditNoticeShown = false
         baselineLabel = null
         activeSessionId = null

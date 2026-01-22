@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the diff workflow for the OpenCode JetBrains plugin. The design aligns with Claude Code: use the working tree as the source of truth, rely on explicit `file.edited` events to scope OpenCode changes, and use LocalHistory for safe rollback.
+This document describes the diff workflow for the OpenCode JetBrains plugin. The design aligns with Claude Code: use the working tree as the source of truth, rely on explicit `file.edited` events and a `DocumentListener` to attribute changes, and use LocalHistory for safe rollback.
 
 ---
 
@@ -21,6 +21,7 @@ graph TD
             OCS[OpenCodeService]
             SM[SessionManager]
             DVS[DiffViewerService]
+            DL[DocumentListener]
         end
 
         subgraph UI [User Interface]
@@ -30,6 +31,7 @@ graph TD
 
         subgraph Data [Local State]
             EditList[OpenCode Edited Files]
+            UserList[User Edited Files]
             LocalHist[Local History Label]
             VFS[Virtual File System]
         end
@@ -45,8 +47,9 @@ graph TD
     SSE -->|Session Status| OCS
     OCS -->|Delegate| SM
 
+    DL -->|Track user typing| UserList
     SM -->|Create baseline label| LocalHist
-    SM -->|Track OpenCode edits| EditList
+    SM -->|Track file.edited events| EditList
     SM -->|Fetch diffs (fallback)| API
     API -->|Diff data| SM
     SM -->|Show diffs| DVS
@@ -67,30 +70,39 @@ sequenceDiagram
     participant Server
     participant SSE
     participant SM as SessionManager
+    participant DL as DocumentListener
     participant Disk
     participant Diff as DiffViewer
 
     Server->>SSE: session.status(busy)
     SSE->>SM: onSessionStatusChanged
-    SM->>SM: clear edit list
+    SM->>SM: clear edit lists (AI & User)
     SM->>SM: create LocalHistory label
 
+    Note over DL, Disk: User types in IDE
+    DL->>SM: detect user edit
+    SM->>SM: record in UserList
+
+    Note over Server, Disk: AI writes to disk
     Server->>Disk: writes files
     SSE->>SM: file.edited events
-    SM->>SM: record edited files
+    SM->>SM: record in AI EditList
 
     Server->>SSE: session.idle
     SSE->>SM: trigger diff fetch
     SM->>Server: getSessionDiff
-    SM->>SM: choose edited list or server diff
-    SM->>Disk: read current content
-    SM->>Diff: show diff chain
+    SM->>SM: select files from AI EditList
+    SM->>Disk: read current content (merged)
+    SM->>Diff: show diff chain (With User Edits labeled)
 
     Diff->>SM: Accept
-    SM->>Disk: git add / git add -A
+    SM->>Disk: git add (stages merged state)
 
     Diff->>SM: Reject
-    SM->>Disk: restore LocalHistory/server/Git HEAD
+    alt User Edited this file
+        SM->>Diff: show data loss warning
+    end
+    SM->>Disk: restore LocalHistory baseline
 ```
 
 ---
@@ -101,59 +113,56 @@ sequenceDiagram
 
 - **Trigger**: SSE `session.status` (`busy` → `idle`) and `session.idle`.
 - **Busy Start**:
-  - Clear the OpenCode edit list.
+  - Clear the OpenCode edit list and the User edit list.
   - Create LocalHistory label `OpenCode Modified Before`.
 - **Edit Tracking**:
-  - On `file.edited`, record the file path in the OpenCode edit list and refresh VFS.
-- **Idle**:
+  - **AI Edits**: Captured via `file.edited` events (Scoping).
+  - **User Edits**: Captured via `DocumentListener` (Attribution). If a change occurs within a named command (e.g., "Typing"), it is flagged as a user edit.
+- **Idle Phase**:
   - Fetch session diffs from the server (metadata only).
   - Build the display list:
-    - If OpenCode edit list is **non-empty**, use it as the file set.
-    - If the edit list is empty, skip diff display and notify once per busy cycle.
-    - If a file appears in the edit list but not in the server diff, build the entry from disk content only.
-    - Resolve **before** from LocalHistory, then server `before`, then Git HEAD, else empty string.
-    - Resolve **after** from current disk content; if disk is unavailable, fall back to server `after`.
-    - Skip entries where `before == after`.
-- **Display**: Use DiffManager multi-file chain, no implicit accept or duplicate suppression.
+    - **Filter**: Only files in the OpenCode edit list are shown.
+    - **Fallback**: If the AI edit list is empty, diff display is skipped and a notification is shown.
+    - **UI Hints**: If a file is in both the AI and User edit lists, the right-side content title includes `(With User Edits)`.
+    - **Content**: Resolve **before** from LocalHistory baseline; resolve **after** from current disk content.
+- **Display**: Use DiffManager multi-file chain.
 
 ### 2. Accept (Stage Changes)
 
-- **Operation**: `git add <file>` or `git add -A <file>` if deleted.
-- **Behavior**: stages the current disk content; no overwrite prompts or disk rewrites.
+- **Operation**: `git add <file>` or `git add -A <file>`.
+- **Behavior**: Stages the current disk content (including any user micro-adjustments made during AI generation).
 
 ### 3. Reject (Restore Changes)
 
-- **Operation**: restore to `before` content.
-- **Data source**: LocalHistory baseline → server `before` → Git HEAD.
-- **Deletion**: if `before` is empty and the file is untracked, delete the file via VFS.
+- **Operation**: Restore to the `before` state (LocalHistory baseline).
+- **Safety**:
+  - If the file contains user edits, a warning dialog is shown before proceeding.
+  - After restoration, a LocalHistory label `OpenCode Rejected <file>` is created.
 
 ---
 
 ## Strategy Matrix
 
-| Scenario | File State | OpenCode Action | "Before" Source | Accept Behavior | Reject Behavior |
-|----------|------------|-----------------|------------------|-----------------|-----------------|
-| **A** | Missing | Create new file | Empty | `git add` | Delete file |
-| **B** | Untracked (dirty) | Modify content | LocalHistory | `git add` | Restore LocalHistory |
-| **C** | Tracked (clean) | Modify content | LocalHistory / Git HEAD | `git add` | Restore LocalHistory |
-| **D** | Tracked (dirty) | Modify content | LocalHistory | `git add` | Restore LocalHistory |
-
----
-
-## LocalHistory Safety Net
-
-LocalHistory is the rollback backbone. Labels are created at key points:
-
-| Trigger | Label | Purpose |
-|--------|-------|---------|
-| Session start | `OpenCode Modified Before` | Capture baseline before OpenCode edits |
-| Session end | `OpenCode Modified After` | Capture final state after edits |
-| Reject action | `OpenCode Rejected <file>` | Allow recovery after reject |
+| Scenario | File State | OpenCode Action | User Action | Diff Label | Reject Behavior |
+|----------|------------|-----------------|-------------|------------|-----------------|
+| **A** | Modified | Edited | None | Normal | Restore Baseline |
+| **B** | Modified | Edited | Edited | `(With User Edits)` | **Warning** -> Restore |
+| **C** | Modified | None | Edited | *Not shown* | N/A |
+| **D** | New File | Created | Edited | `(With User Edits)` | **Warning** -> Delete |
 
 ---
 
 ## Known Issues & Mitigations
 
-- **Missing `file.edited` events**: diff display is skipped and a notification is shown once per busy cycle.
-- **Server Chinese filename encoding**: handled by `FileDiffDeserializer`; the `after` content is read from disk, reducing reliance on server payloads.
-- **LocalHistory lookup failure**: fallback order is server `before` → Git HEAD → empty string.
+- **Missing `file.edited` events**: Diff display is skipped to prevent user-only edits from being incorrectly attributed to the AI.
+- **Server Chinese filename encoding**: Handled by `FileDiffDeserializer`; `after` content is read from disk, bypassing server payload bugs.
+- **LocalHistory lookup failure**: Fallback order is server `before` → Git HEAD → empty string.
+
+---
+
+## Future Roadmap
+
+### 1. Granular (Fragment-level) Attribution
+- **Current**: Attribution is file-level.
+- **Goal**: Use side-by-side or three-way diffs to distinguish which lines were modified by the AI vs. the user.
+- **Requirement**: Reliable server-side `after` content or internal offset tracking.

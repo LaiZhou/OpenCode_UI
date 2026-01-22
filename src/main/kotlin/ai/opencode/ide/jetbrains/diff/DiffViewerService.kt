@@ -56,14 +56,18 @@ class DiffViewerService(private val project: Project) : Disposable {
 
         val total = allEntries.size.coerceAtLeast(1)
         val currentIndex = (index + 1).coerceAtLeast(1)
+        val sessionManager = project.service<SessionManager>()
+        val hasUserEdits = sessionManager.hasUserEdits(entry.diff.file)
+        val afterTitleSuffix = if (hasUserEdits) " (With User Edits)" else ""
 
         val request = SimpleDiffRequest(
-            "${entry.diff.file} ($currentIndex of $total)",
+            "[$currentIndex/$total] ${entry.diff.file}",
             beforeContent,
             afterContent,
             "Original",
-            "OpenCode (Modified)"
+            "OpenCode (Modified)$afterTitleSuffix"
         )
+
 
         decorateRequest(request, entry)
         DiffManager.getInstance().showDiff(project, request)
@@ -85,18 +89,21 @@ class DiffViewerService(private val project: Project) : Disposable {
             val fileType = FileTypeManager.getInstance()
                 .getFileTypeByFileName(entry.diff.file)
             
-            // Show filename and progress (e.g., "file.txt (1 of 8)")
-            val title = "${entry.diff.file} (${index + 1} of $total)"
+            // Show progress first (e.g., "[1/8] file.txt") to ensure it's visible even if truncated
+            val progressTitle = "[${index + 1}/$total] ${entry.diff.file}"
+
+            val hasUserEdits = project.service<SessionManager>().hasUserEdits(entry.diff.file)
+            val afterTitleSuffix = if (hasUserEdits) " (With User Edits)" else ""
 
             val beforeText = resolveBeforeContent(entry)
             val afterText = resolveAfterContent(entry)
 
             val request = SimpleDiffRequest(
-                title,
+                progressTitle,
                 DiffContentFactory.getInstance().create(project, beforeText, fileType),
                 DiffContentFactory.getInstance().create(project, afterText, fileType),
                 "Original",
-                "Modified (OpenCode)"
+                "Modified (OpenCode)$afterTitleSuffix"
             )
             decorateRequest(request, entry)
             request
