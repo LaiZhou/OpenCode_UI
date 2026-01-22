@@ -93,7 +93,7 @@ sequenceDiagram
     SM->>Server: getSessionDiff
     SM->>SM: select files from AI EditList
     SM->>Disk: read current content (merged)
-    SM->>Diff: show diff chain (With User Edits labeled)
+    SM->>Diff: show diff chain (OpenCode + User labeled)
 
     Diff->>SM: Accept
     SM->>Disk: git add (stages merged state)
@@ -123,7 +123,7 @@ sequenceDiagram
   - Build the display list:
     - **Filter**: Only files in the OpenCode edit list are shown.
     - **Fallback**: If the AI edit list is empty, diff display is skipped and a notification is shown.
-    - **UI Hints**: If a file is in both the AI and User edit lists, the right-side content title includes `(With User Edits)`.
+    - **UI Hints**: If a file is in both the AI and User edit lists, the right-side content title uses `Modified (OpenCode + User)`.
     - **Content**: Resolve **before** from LocalHistory baseline; resolve **after** from current disk content.
 - **Display**: Use DiffManager multi-file chain.
 
@@ -146,9 +146,9 @@ sequenceDiagram
 | Scenario | File State | OpenCode Action | User Action | Diff Label | Reject Behavior |
 |----------|------------|-----------------|-------------|------------|-----------------|
 | **A** | Modified | Edited | None | Normal | Restore Baseline |
-| **B** | Modified | Edited | Edited | `(With User Edits)` | **Warning** -> Restore |
+| **B** | Modified | Edited | Edited | Modified (OpenCode + User) | **Warning** -> Restore |
 | **C** | Modified | None | Edited | *Not shown* | N/A |
-| **D** | New File | Created | Edited | `(With User Edits)` | **Warning** -> Delete |
+| **D** | New File | Created | Edited | Modified (OpenCode + User) | **Warning** -> Delete |
 
 ---
 

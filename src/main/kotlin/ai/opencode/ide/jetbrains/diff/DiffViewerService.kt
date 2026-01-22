@@ -58,14 +58,14 @@ class DiffViewerService(private val project: Project) : Disposable {
         val currentIndex = (index + 1).coerceAtLeast(1)
         val sessionManager = project.service<SessionManager>()
         val hasUserEdits = sessionManager.hasUserEdits(entry.diff.file)
-        val afterTitleSuffix = if (hasUserEdits) " (With User Edits)" else ""
+        val afterTitle = if (hasUserEdits) "Modified (OpenCode + User)" else "OpenCode (Modified)"
 
         val request = SimpleDiffRequest(
             "[$currentIndex/$total] ${entry.diff.file}",
             beforeContent,
             afterContent,
             "Original",
-            "OpenCode (Modified)$afterTitleSuffix"
+            afterTitle
         )
 
 
@@ -93,7 +93,7 @@ class DiffViewerService(private val project: Project) : Disposable {
             val progressTitle = "[${index + 1}/$total] ${entry.diff.file}"
 
             val hasUserEdits = project.service<SessionManager>().hasUserEdits(entry.diff.file)
-            val afterTitleSuffix = if (hasUserEdits) " (With User Edits)" else ""
+            val afterTitle = if (hasUserEdits) "Modified (OpenCode + User)" else "Modified (OpenCode)"
 
             val beforeText = resolveBeforeContent(entry)
             val afterText = resolveAfterContent(entry)
@@ -103,7 +103,7 @@ class DiffViewerService(private val project: Project) : Disposable {
                 DiffContentFactory.getInstance().create(project, beforeText, fileType),
                 DiffContentFactory.getInstance().create(project, afterText, fileType),
                 "Original",
-                "Modified (OpenCode)$afterTitleSuffix"
+                afterTitle
             )
             decorateRequest(request, entry)
             request
