@@ -33,6 +33,8 @@ Layer 1: Mock IDE + Fake Server (OpenCodeLogicTest)
 | **Scenario B: Pure Conversation** | 纯对话，无文件编辑 | 验证即使 API 返回干扰数据，前端也不显示 Diff。 |
 | **Scenario C: Turn Isolation** | Turn 1 结束，Turn 2 立即开始 | 验证 Turn 1 的 Diff 仍然保留，且 Turn 2 结束时不会显示 Turn 1 的内容。 |
 | **Scenario D: Race Condition** | Turn 1 结束触发 Fetch，Turn 2 立即开始 | 模拟网络延迟，验证 Snapshot 机制能正确处理这种竞态。 |
+| **Scenario E: Delete -> Reject -> Delete** | 恢复被删文件后再次被删 | 验证 Memory Snapshot (Known State) 能正确恢复 Before 内容。 |
+| **Scenario F: New File Safety** | AI 新建文件 | 验证 Disk Fallback 逻辑不会错误地读取新文件作为 Before (导致 Diff 消失)。 |
 
 ### 2. 真实集成测试 (`RealProcessIntegrationTest`)
 

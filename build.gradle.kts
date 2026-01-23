@@ -43,10 +43,10 @@ intellijPlatform {
         changeNotes = """
             <h2>1.0.6</h2>
             <ul>
-              <li>Fix: Resolved missing diffs for file deletions/creations (adopted Server Authoritative strategy).</li>
-              <li>Fix: Eliminated "ghost diffs" from previous turns (strict turn isolation).</li>
-              <li>Fix: Improved "New File" detection to prevent accidental data loss during Reject.</li>
-              <li>Fix: Resolved Git errors when accepting deletion of untracked files.</li>
+              <li>Fix: Critical fix for missing diffs on file deletion (Gap Event Capture & VFS Rescue).</li>
+              <li>Fix: Eliminated "ghost diffs" from previous turns (Content-based filtering).</li>
+              <li>Fix: Robust handling of "Reject -> Delete Again" scenarios (Memory Snapshot).</li>
+              <li>Fix: Resolved missing diffs for new files (Server Authoritative).</li>
             </ul>
         """.trimIndent()
     }

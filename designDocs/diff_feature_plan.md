@@ -67,23 +67,22 @@ sequenceDiagram
 ### 1. Diff 收集与展示
 
 - **触发器**: SSE `session.status` (`busy` → `idle`) 和 `session.idle`。
-- **策略: 服务器权威 (Server Authoritative)**: 
-  - 我们信任服务器返回的 Diff 数据作为 AI 工作的事实来源。
-  - **不再**使用本地 VFS 事件 (`file.edited`) 过滤 Diff。这解决了 VFS 事件延迟导致新建文件 Diff 不显示的 Bug。
-  - 本地 VFS 事件仅用于：
-    1. 检测用户冲突 (`hasUserEdits`)。
-    2. 辅助判断新建文件 (`isNewFile`) 以优化 Reject 行为。
+- **策略: 服务器权威 + 客户端智能过滤**: 
+  - **Server Authoritative**: 信任服务器返回的 Diff 数据作为事实来源。
+  - **Gap Event Capture**: VFS 事件记录在 `onTurnEnd` 时轮转。这确保了在 Turn 间隔（Gap）期间发生的事件被归因到下一个 Turn，防止 "Late Baseline" 竞态条件。
+  - **VFS Rescue**: 在过滤 `Before == After` (Ghost Diff) 时，如果 VFS 在本轮明确捕获到了变更（`aiEditedFiles`），强制显示。这挽救了因快照滞后导致的 "Empty->Empty" 删除操作 Diff 丢失问题。
 
 - **Busy 开始**:
-  - **幂等转换**: 仅当会话从非 Busy 状态变为 `Busy` 时，才清空基于轮次（Turn-based）的状态。
+  - **Memory Snapshot**: 从上一轮继承 `lastKnownFileStates`（Reject 恢复的内容）。
   - 创建 LocalHistory 基准标签 `OpenCode Modified Before`。
 
 - **Idle 阶段**:
-  - **严格栅栏机制 (Strict Barrier)**: 仅当 `Idle` 信号 **且** (`MessageID` **或** `SessionDiff` Payload) 同时存在时，才触发 Diff 拉取。
-  - **Fetch 优先级**: 
-    1. 精确的 `GET /session/:id/diff?messageID=`。
-    2. 缓存的 SSE Payload。
-    3. Session Summary。
+  - **Strict Barrier**: 等待 Idle + ID/Payload。
+  - **Baseline Resolution (三级回退)**:
+    1. **LocalHistory**: 首选。
+    2. **Known State**: 内存快照 (处理 Reject 后的状态丢失)。
+    3. **Disk Fallback**: 仅当 Server 意图为删除 (`After=""`) 且 `Before=""` 时读取磁盘 (防止新建文件误判)。
+  - **Content Filtering**: 过滤 `Before == After` 的文件，除非触发 **VFS Rescue**。
 
 - **展示**: 使用 DiffManager 多文件链展示。
 
