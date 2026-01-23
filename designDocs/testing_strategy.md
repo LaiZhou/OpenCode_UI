@@ -83,15 +83,15 @@ sequenceDiagram
     Note right of Snapshot: Holds ref to aiEditedFiles (Set A)
     
     SessionManager->>DiffViewer: processDiffs(Snapshot)
-    DiffViewer->>DiffViewer: Filter diffs using Snapshot.aiEditedFiles
+    DiffViewer->>DiffViewer: Map context (UserEdits, IsNew) using Snapshot
 ```
 
 ### 关键机制
 
 1.  **TurnSnapshot**: 在 Turn 结束时创建不可变快照，后续的 Diff 拉取和处理完全依赖此快照。
 2.  **Set Swapping**: 在 `onTurnStart` 时替换 `aiEditedFiles` 集合引用，物理隔离新旧 Turn 的状态。
-3.  **Active VFS Refresh**: 在处理 Diff 前主动刷新 VFS，消除文件系统延迟。
-4.  **Late Retry**: 监听 Idle 期间的 VFS 事件，如果发现遗漏的文件，使用暂存的 Snapshot 进行补救。
+3.  **Server Authoritative**: 信任 Server 返回的 Diff 数据，不因 VFS 事件缺失而过滤。
+4.  **Active VFS Refresh**: 在处理 Diff 前主动刷新 VFS，消除文件系统延迟。
 
 ---
 

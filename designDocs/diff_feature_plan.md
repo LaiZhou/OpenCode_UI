@@ -46,7 +46,7 @@ sequenceDiagram
     SSE->>OCS: attemptBarrierTrigger
     OCS->>OCS: 等待 Idle + ID/Payload
     OCS->>Server: getSessionDiff(messageID)
-    OCS->>SM: 过滤/解析 diffs
+    OCS->>SM: 过滤/解析 diffs (Server Authoritative)
     SM->>Disk: 读取当前内容 (已合并)
     SM->>Diff: 展示 diff 链 (标注 OpenCode + User)
 
@@ -67,35 +67,37 @@ sequenceDiagram
 ### 1. Diff 收集与展示
 
 - **触发器**: SSE `session.status` (`busy` → `idle`) 和 `session.idle`。
+- **策略: 服务器权威 (Server Authoritative)**: 
+  - 我们信任服务器返回的 Diff 数据作为 AI 工作的事实来源。
+  - **不再**使用本地 VFS 事件 (`file.edited`) 过滤 Diff。这解决了 VFS 事件延迟导致新建文件 Diff 不显示的 Bug。
+  - 本地 VFS 事件仅用于：
+    1. 检测用户冲突 (`hasUserEdits`)。
+    2. 辅助判断新建文件 (`isNewFile`) 以优化 Reject 行为。
+
 - **Busy 开始**:
-  - **幂等转换**: 仅当会话从非 Busy 状态变为 `Busy` 时，才清空基于轮次（Turn-based）的状态（编辑列表、messageID 等）。
+  - **幂等转换**: 仅当会话从非 Busy 状态变为 `Busy` 时，才清空基于轮次（Turn-based）的状态。
   - 创建 LocalHistory 基准标签 `OpenCode Modified Before`。
-- **编辑追踪**:
-  - **AI 编辑**: 通过 `file.edited` 事件捕获。
-  - **用户编辑**: 通过 `DocumentListener` 追踪。
+
 - **Idle 阶段**:
   - **严格栅栏机制 (Strict Barrier)**: 仅当 `Idle` 信号 **且** (`MessageID` **或** `SessionDiff` Payload) 同时存在时，才触发 Diff 拉取。
   - **Fetch 优先级**: 
-    1. 精确的 `GET /session/:id/diff?messageID=` (严格模式: 信任 API 结果优先于 SSE payload)。
-    2. 缓存的 SSE Payload (仅当 ID 缺失或 Fetch 失败时作为兜底)。
-    3. Session Summary (最后的手段)。
-  - 构建展示列表:
-    - **过滤**: 仅展示 AI 编辑列表中的文件。
-    - **差异检查 (Discrepancy Check)**: 如果没有编辑事件，检查磁盘内容是否偏离了基准 **且** 偏离了 Server 期望的 `after` 状态（忽略陈旧残留）。
+    1. 精确的 `GET /session/:id/diff?messageID=`。
+    2. 缓存的 SSE Payload。
+    3. Session Summary。
 
 - **展示**: 使用 DiffManager 多文件链展示。
 
 ### 2. Accept (暂存变更)
 
 - **操作**: `git add <file>` 或 `git add -A <file>`。
-- **行为**: 暂存当前磁盘内容（包含 AI 生成期间用户的任何微调）。
+- **行为**: 暂存当前磁盘内容。
 
 ### 3. Reject (恢复变更)
 
-- **操作**: 恢复到 `before` 状态（LocalHistory 基准）。
+- **操作**: 恢复到 `before` 状态（优先使用 LocalHistory，降级使用 Server Before）。
 - **安全性**:
   - 如果文件包含用户编辑，在继续前显示警告对话框。
-  - 恢复后，创建 LocalHistory 标签 `OpenCode Rejected <file>`。
+  - 如果判定为新建文件，执行物理删除。
 
 ---
 
@@ -105,25 +107,24 @@ sequenceDiagram
 |----------|------------|-----------------|-------------|------------|-----------------|
 | **A** | 已修改 | Edited | 无 | Normal | 恢复基准 |
 | **B** | 已修改 | Edited | Edited | Modified (OpenCode + User) | **警告** -> 恢复 |
-| **C** | 已修改 | 无 | Edited | *不展示* | N/A |
+| **C** | 仅 Diff | (VFS 延迟) | 无 | Normal | 恢复 Server Before |
 | **D** | 新文件 | Created | Edited | Modified (OpenCode + User) | **警告** -> 删除 |
 
 ---
 
 ## 已知问题与缓解措施
 
-- **缺少 `file.edited` 事件**: Diff 展示被跳过，以防止用户独有的编辑被错误归因于 AI。
-- **缺少 `messageID`**: Diff 拉取被跳过，除非有缓存的 `session.diff` payload 可用（避免陈旧的历史 diff）。
-- **Server 中文文件名编码**: 由 `FileDiffDeserializer` 处理；`after` 内容直接从磁盘读取，绕过 Server payload 的潜在 bug。
+- **缺少 `messageID`**: Diff 拉取被跳过，除非有缓存的 `session.diff` payload 可用。
+- **Server 中文文件名编码**: 由 `FileDiffDeserializer` 处理。
 - **LocalHistory 查找失败**: 回退顺序为 Server `before` → Git HEAD → 空字符串。
 
 ---
 
-## 实现细节 (2026-01-22 重构)
+## 实现细节 (2026-01-23 策略更新)
 
 ### 核心架构重构
 
-重构后的架构遵循"单一职责"和"清晰生命周期"原则：
+重构后的架构遵循 "Server Authoritative" 原则：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -144,19 +145,13 @@ sequenceDiagram
 │  (Turn 状态, Diff 存储, Accept/Reject 操作)                      │
 ├─────────────────────────────────────────────────────────────────┤
 │  Turn State:                                                     │
-│    - isBusy: Boolean (当前是否在 AI turn 中)                     │
+│    - isBusy: Boolean                                             │
 │    - baselineLabel: Label (LocalHistory 基准)                    │
-│    - aiEditedFiles: Set<String> (AI 编辑的文件)                  │
-│    - userEditedFiles: Set<String> (用户编辑的文件)               │
-│                                                                  │
-│  Pending Diffs:                                                  │
-│    - pendingDiffs: Map<String, DiffEntry>                        │
+│    - aiEditedFiles: Set<String> (用于上下文，非过滤)             │
+│    - userEditedFiles: Set<String> (用于冲突检测)                 │
 │                                                                  │
 │  Core APIs:                                                      │
-│    - onTurnStart(): 创建基准, 清空状态                           │
-│    - onTurnEnd(): 标记 turn 结束                                 │
-│    - onFileEdited(path): 记录 AI 编辑                            │
-│    - processDiffs(serverDiffs): 过滤并存储 diff                  │
+│    - processDiffs(serverDiffs): 信任 Server Diff，注入 VFS 上下文│
 │    - acceptDiff(entry, callback): 异步 git add                   │
 │    - rejectDiff(entry, callback): 异步恢复文件                   │
 └─────────────────────────────────────────────────────────────────┘
