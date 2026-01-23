@@ -157,6 +157,38 @@ class OpenCodeLogicTest {
             r.assertDiffShown("c.kt")
             println("✓ Passed")
 
+            println("\n--------------------------------------------------")
+            println("TEST: Scenario E: Delete -> Reject -> Delete Again (Empty Diff Fix)")
+            println("--------------------------------------------------")
+            
+            r.resetState()
+            
+            // 1. Prepare file on disk (simulate Reject result)
+            val tempDir = System.getProperty("java.io.tmpdir")
+            val file = java.io.File(tempDir, "deleted.kt")
+            file.writeText("original content")
+            println("  Step 1: File created at ${file.absolutePath}")
+            
+            // 2. Start Turn
+            s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"busy"}}}""")
+            s.broadcast("""{"type":"file.edited","properties":{"file":"deleted.kt"}}""")
+            s.broadcast("""{"type":"message.updated","properties":{"info":{"id":"msg-7","sessionID":"s1","role":"assistant"}}}""")
+            
+            // 3. Server returns empty before/after (thinks file is already gone)
+            // But since file exists on disk, we expect Before to be populated from disk
+            s.setDiffResponse("msg-7", """[{"file":"deleted.kt","before":"","after":"","additions":0,"deletions":0}]""")
+            
+            // 4. End Turn
+            s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"idle"}}}""")
+            
+            // 5. Verify
+            r.waitForDiffs(1)
+            r.assertDiffContent("deleted.kt", "original content")
+            println("✓ Passed")
+            
+            // Cleanup
+            file.delete()
+
             println("\nAll tests passed!")
             
         } catch (e: Throwable) {
@@ -175,12 +207,13 @@ class TestRunner(val serverPort: Int) {
 
     init {
         // Setup Mocks
+        val tempDir = System.getProperty("java.io.tmpdir")
         mockProject = Proxy.newProxyInstance(
             Project::class.java.classLoader,
             arrayOf(Project::class.java)
         ) { _, method, _ ->
             when (method.name) {
-                "getBasePath" -> "/tmp/test"
+                "getBasePath" -> tempDir
                 "isDisposed" -> false
                 "toString" -> "MockProject"
                 "hashCode" -> 12345
@@ -230,6 +263,21 @@ class TestRunner(val serverPort: Int) {
         val files = shown.map { it.file }
         if (file !in files) throw AssertionError("File $file not in shown diffs: $files")
         mockDiffViewer.shownDiffs.clear()
+    }
+    
+    fun assertDiffContent(file: String, expectedBefore: String) {
+        val shown = mockDiffViewer.shownDiffs.lastOrNull() ?: throw AssertionError("No diffs shown")
+        val diff = shown.firstOrNull { it.file == file } ?: throw AssertionError("File $file not in shown diffs")
+        if (diff.beforeContent != expectedBefore) {
+            throw AssertionError("Expected before '$expectedBefore', got '${diff.beforeContent}'")
+        }
+        mockDiffViewer.shownDiffs.clear()
+    }
+    
+    fun getLastDiff(file: String): DiffEntry {
+        // Deprecated helper, use assertDiffContent
+        val shown = mockDiffViewer.shownDiffs.lastOrNull() ?: throw AssertionError("No diffs shown")
+        return shown.first { it.file == file }
     }
     
     fun assertNoDiffsShown() {

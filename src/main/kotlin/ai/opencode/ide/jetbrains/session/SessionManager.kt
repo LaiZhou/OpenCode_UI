@@ -265,17 +265,35 @@ open class SessionManager(private val project: Project) : Disposable {
      * Resolve the "before" content for a file using a snapshot's baseline.
      */
     fun resolveBeforeContent(relativePath: String, serverBefore: String, snapshot: TurnSnapshot): String {
-        val label = snapshot.baselineLabel ?: return serverBefore
-        val absPath = PathUtil.resolveProjectPath(project, relativePath) ?: return serverBefore
-        
-        return try {
-            label.getByteContent(absPath)?.let { 
-                String(it.bytes, Charsets.UTF_8) 
-            } ?: serverBefore
-        } catch (e: Exception) {
-            logger.debug("[Turn #${snapshot.turnNumber}] LocalHistory lookup failed for $relativePath: ${e.message}")
-            serverBefore
+        val absPath = PathUtil.resolveProjectPath(project, relativePath)
+
+        // 1. Try LocalHistory (Baseline)
+        if (snapshot.baselineLabel != null && absPath != null) {
+            try {
+                snapshot.baselineLabel.getByteContent(absPath)?.let { 
+                    return String(it.bytes, Charsets.UTF_8) 
+                }
+            } catch (e: Exception) {
+                logger.debug("[Turn #${snapshot.turnNumber}] LocalHistory lookup failed for $relativePath: ${e.message}")
+            }
         }
+        
+        // 2. Fallback: If Server Before is empty but file exists on disk -> Read Disk
+        // This handles "Reject -> Delete Again" scenario where Server thinks file is gone
+        if (serverBefore.isEmpty() && absPath != null) {
+            try {
+                val file = File(absPath)
+                if (file.exists()) {
+                    logger.info("[Turn #${snapshot.turnNumber}] Server before is empty but file exists. Using disk content as before.")
+                    return file.readText()
+                }
+            } catch (e: Exception) {
+                logger.warn("[Turn #${snapshot.turnNumber}] Failed to read disk fallback for $relativePath", e)
+            }
+        }
+
+        // 3. Default: Server Before
+        return serverBefore
     }
 
     // ==================== Accept/Reject Operations ====================
