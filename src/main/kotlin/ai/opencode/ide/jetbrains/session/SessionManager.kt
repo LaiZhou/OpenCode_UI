@@ -155,17 +155,23 @@ open class SessionManager(private val project: Project) : Disposable {
         
         turnNumber++
         isBusy = true
-        // Swap sets to isolate the new turn from the previous one
-        aiEditedFiles = ConcurrentHashMap.newKeySet()
-        aiCreatedFiles = ConcurrentHashMap.newKeySet()
+        
+        // User edits are cleared here to align with the new Baseline (Label) we are about to create.
+        // Any user edit from this point on is a "deviation" from the baseline.
         userEditedFiles.clear()
-        // Note: pendingDiffs is NOT cleared here - user may still be reviewing previous diffs
+        
+        // NOTE: aiEditedFiles / aiCreatedFiles are NOT cleared here.
+        // They were rotated at the end of the previous turn (or init).
+        // This ensures that VFS events occurring in the "Gap" (Idle phase) 
+        // are attributed to this new turn. This prevents the "Late Baseline" race condition
+        // where AI modifies files BEFORE we create the Baseline, causing Before==After.
+        
         baselineLabel = createSystemLabel("OpenCode Turn #$turnNumber Start")
         
         logger.info("╔══════════════════════════════════════════════════════════════")
         logger.info("║ [Turn #$turnNumber] STARTED")
         logger.info("║ Previous turn #$prevTurn state:")
-        logger.info("║   aiEditedFiles: ${if (prevAiEdited.isEmpty()) "(empty)" else prevAiEdited}")
+        logger.info("║   aiEditedFiles (Gap+Prev): ${if (prevAiEdited.isEmpty()) "(empty)" else prevAiEdited}")
         logger.info("║   userEditedFiles: ${if (prevUserEdited.isEmpty()) "(empty)" else prevUserEdited}")
         logger.info("║   pendingDiffs: ${if (prevPending.isEmpty()) "(empty)" else prevPending}")
         logger.info("╚══════════════════════════════════════════════════════════════")
@@ -202,6 +208,12 @@ open class SessionManager(private val project: Project) : Disposable {
         logger.info("║   aiEditedFiles: ${if (snapshot.aiEditedFiles.isEmpty()) "(empty)" else snapshot.aiEditedFiles}")
         logger.info("║   userEditedFiles: ${if (snapshot.userEditedFiles.isEmpty()) "(empty)" else snapshot.userEditedFiles}")
         logger.info("╚══════════════════════════════════════════════════════════════")
+        
+        // Rotate AI sets for the next interval (Gap + Next Turn).
+        // This effectively "clears" the state for the next turn, but crucially,
+        // it starts collecting NOW (during Idle), catching any "Gap" events.
+        aiEditedFiles = ConcurrentHashMap.newKeySet()
+        aiCreatedFiles = ConcurrentHashMap.newKeySet()
         
         return snapshot
     }
