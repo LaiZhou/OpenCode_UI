@@ -337,10 +337,22 @@ class OpenCodeService(private val project: Project) : Disposable {
                         // Resolve before content on background thread
                         val resolvedEntries = entries.map { entry ->
                             entry.copy(resolvedBefore = sessionManager.resolveBeforeContent(entry.file, entry.diff, snapshot))
+                        }.filter { entry ->
+                            // Filter out files where Before == After (already accepted or no change)
+                            // This handles "Ghost Diffs" where Server returns cumulative diffs from previous turns
+                            // that have already been accepted by the user.
+                            val before = entry.beforeContent
+                            val after = entry.diff.after
+                            before != after
                         }
-                        logger.info("[OpenCode] Turn #${snapshot.turnNumber} Showing ${resolvedEntries.size} diffs")
-                        invokeLater {
-                            if (!project.isDisposed) diffViewerService.showMultiFileDiff(resolvedEntries)
+                        
+                        if (resolvedEntries.isNotEmpty()) {
+                            logger.info("[OpenCode] Turn #${snapshot.turnNumber} Showing ${resolvedEntries.size} diffs")
+                            invokeLater {
+                                if (!project.isDisposed) diffViewerService.showMultiFileDiff(resolvedEntries)
+                            }
+                        } else {
+                            logger.info("[OpenCode] Turn #${snapshot.turnNumber} All diffs filtered out (identical content)")
                         }
                     } else {
                         logger.info("[OpenCode] Turn #${snapshot.turnNumber} No entries after processing")
