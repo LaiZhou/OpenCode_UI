@@ -173,7 +173,7 @@ class RealProcessIntegrationTest : BasePlatformTestCase() {
         assertTrue(entries.isNotEmpty())
         
         // In test environment, provide fallback explicitly
-        val resolvedBefore = sm.resolveBeforeContent(relPath, "Initial Content", snapshot)
+        val resolvedBefore = sm.resolveBeforeContent(relPath, diffs.first(), snapshot)
         val entry = entries.first().copy(resolvedBefore = resolvedBefore)
         
         // 4. Test REJECT
