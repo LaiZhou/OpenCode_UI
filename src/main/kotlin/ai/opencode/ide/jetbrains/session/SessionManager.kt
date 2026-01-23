@@ -66,6 +66,13 @@ open class SessionManager(private val project: Project) : Disposable {
     /** Files edited by user during this turn (relative paths) */
     private val userEditedFiles = ConcurrentHashMap.newKeySet<String>()
     
+    /** 
+     * Cache of last known file content after a Reject operation.
+     * Used as a reliable fallback for 'Before' content if LocalHistory fails/is empty 
+     * and Server state is stale (e.g. Server thinks file is deleted).
+     */
+    private val lastKnownFileStates = ConcurrentHashMap<String, String>()
+    
     // ==================== Pending Diffs ====================
     
     /** Pending diffs awaiting user action, keyed by relative file path */
@@ -186,7 +193,8 @@ open class SessionManager(private val project: Project) : Disposable {
             aiEditedFiles = aiEditedFiles, 
             aiCreatedFiles = aiCreatedFiles,
             userEditedFiles = userEditedFiles.toSet(),
-            baselineLabel = baselineLabel
+            baselineLabel = baselineLabel,
+            knownFileStates = HashMap(lastKnownFileStates)
         )
         
         logger.info("╔══════════════════════════════════════════════════════════════")
@@ -279,7 +287,14 @@ open class SessionManager(private val project: Project) : Disposable {
             }
         }
         
-        // 2. Fallback: If Server Before is empty but file exists on disk -> Read Disk
+        // 2. Try Known State (Memory Snapshot)
+        // This handles cases where LocalHistory failed/missed but we explicitly restored content recently
+        snapshot.knownFileStates[relativePath]?.let { knownContent ->
+            logger.info("[Turn #${snapshot.turnNumber}] Using known state for $relativePath")
+            return knownContent
+        }
+        
+        // 3. Fallback: If Server Before is empty but file exists on disk -> Read Disk
         // CRITICAL: Only do this if 'After' is also empty (Delete intent).
         // If 'After' has content (Create/Modify), disk likely contains AI's new content,
         // so reading it would incorrectly set Before == After, hiding the diff.
@@ -395,6 +410,13 @@ open class SessionManager(private val project: Project) : Disposable {
                     if (success) {
                         pendingDiffs.remove(path)
                         createSystemLabel("OpenCode Rejected: $path")
+                        
+                        // Update Known State for next turn safety
+                        if (entry.isNewFile) {
+                            lastKnownFileStates.remove(path)
+                        } else {
+                            lastKnownFileStates[path] = beforeContent
+                        }
                     }
                 } catch (e: Exception) {
                     logger.error("[SessionManager] Reject failed: $path", e)
@@ -427,6 +449,7 @@ open class SessionManager(private val project: Project) : Disposable {
         aiCreatedFiles.clear()
         userEditedFiles.clear()
         pendingDiffs.clear()
+        lastKnownFileStates.clear()
     }
 
     override fun dispose() {
@@ -443,5 +466,6 @@ data class TurnSnapshot(
     val aiEditedFiles: Set<String>,
     val aiCreatedFiles: Set<String>,
     val userEditedFiles: Set<String>,
-    val baselineLabel: Label?
+    val baselineLabel: Label?,
+    val knownFileStates: Map<String, String> = emptyMap()
 )
