@@ -339,11 +339,18 @@ class OpenCodeService(private val project: Project) : Disposable {
                             entry.copy(resolvedBefore = sessionManager.resolveBeforeContent(entry.file, entry.diff, snapshot))
                         }.filter { entry ->
                             // Filter out files where Before == After (already accepted or no change)
-                            // This handles "Ghost Diffs" where Server returns cumulative diffs from previous turns
-                            // that have already been accepted by the user.
+                            // This handles "Ghost Diffs" where Server returns cumulative diffs from previous turns.
                             val before = entry.beforeContent
                             val after = entry.diff.after
-                            before != after
+                            
+                            if (before != after) return@filter true
+                            
+                            // Rescue: If content appears identical (e.g. Empty->Empty delete) but VFS explicitly 
+                            // detected a change this turn, we should still show it. This rescues "Real Deletes"
+                            // where Before content was lost/empty.
+                            if (entry.file in snapshot.aiEditedFiles) return@filter true
+                            
+                            false
                         }
                         
                         if (resolvedEntries.isNotEmpty()) {
