@@ -119,6 +119,132 @@ sequenceDiagram
 
 ---
 
+## 实现细节 (2026-01-22 重构)
+
+### 核心架构重构
+
+重构后的架构遵循"单一职责"和"清晰生命周期"原则：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       OpenCodeService                            │
+│  (SSE 事件分发, Turn 生命周期触发, API 调用)                     │
+├─────────────────────────────────────────────────────────────────┤
+│  handleEvent()                                                   │
+│    ├─ session.status(busy)  → sessionManager.onTurnStart()       │
+│    ├─ file.edited           → sessionManager.onFileEdited()      │
+│    ├─ session.idle          → sessionManager.onTurnEnd()         │
+│    │                           + fetchAndShowDiffs()             │
+│    └─ message.updated       → cache messageID for fetch          │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       SessionManager                             │
+│  (Turn 状态, Diff 存储, Accept/Reject 操作)                      │
+├─────────────────────────────────────────────────────────────────┤
+│  Turn State:                                                     │
+│    - isBusy: Boolean (当前是否在 AI turn 中)                     │
+│    - baselineLabel: Label (LocalHistory 基准)                    │
+│    - aiEditedFiles: Set<String> (AI 编辑的文件)                  │
+│    - userEditedFiles: Set<String> (用户编辑的文件)               │
+│                                                                  │
+│  Pending Diffs:                                                  │
+│    - pendingDiffs: Map<String, DiffEntry>                        │
+│                                                                  │
+│  Core APIs:                                                      │
+│    - onTurnStart(): 创建基准, 清空状态                           │
+│    - onTurnEnd(): 标记 turn 结束                                 │
+│    - onFileEdited(path): 记录 AI 编辑                            │
+│    - processDiffs(serverDiffs): 过滤并存储 diff                  │
+│    - acceptDiff(entry, callback): 异步 git add                   │
+│    - rejectDiff(entry, callback): 异步恢复文件                   │
+└─────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       DiffViewerService                          │
+│  (多文件 Diff 展示, 导航)                                        │
+├─────────────────────────────────────────────────────────────────┤
+│  showMultiFileDiff(entries, startIndex)                          │
+│    → 创建 DiffChain                                              │
+│    → 注册 Accept/Reject Actions                                  │
+│    → 打开 IDE Diff 窗口                                          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 简化的数据模型
+
+**DiffEntry** (重构后):
+
+```kotlin
+data class DiffEntry(
+    val file: String,           // 相对路径 (规范化)
+    val diff: FileDiff,         // 文件差异内容
+    val hasUserEdits: Boolean   // 用户是否也编辑过
+) {
+    val isNewFile: Boolean get() = diff.before.isEmpty()
+}
+```
+
+**删除的冗余字段**:
+- `DiffBatch`, `DiffBatchSummary` (未使用)
+- `sessionId`, `messageId`, `partId`, `timestamp` (未使用)
+- `canRevert()` 方法 (逻辑内联到 reject 流程)
+
+### Accept/Reject 异步操作设计
+
+`acceptDiff` 和 `rejectDiff` 采用**回调模式**：
+
+```kotlin
+fun acceptDiff(entry: DiffEntry, onComplete: ((Boolean) -> Unit)? = null)
+fun rejectDiff(entry: DiffEntry, onComplete: ((Boolean) -> Unit)? = null)
+```
+
+**关键设计决策**:
+
+1. **状态延迟清除**: `pendingDiffs.remove(path)` 仅在操作成功后执行
+2. **回调在 EDT 调用**: 调用方可安全更新 UI
+3. **边缘情况处理**:
+   - `acceptDiff`: 检查 `waitFor` 返回值和 `exitCode` 双重验证
+   - `rejectDiff`: 文件不存在且 before 为空时视为成功（no-op 场景）
+
+### Reject 用户编辑警告
+
+根据策略矩阵，当 `entry.hasUserEdits == true` 时（场景 B/D），显示数据丢失警告：
+
+```
+WARNING: You have also edited this file. Your changes will be lost!
+```
+
+对话框标题变更为 "Confirm Reject (Data Loss Warning)" 以强调风险。
+
+### Turn 生命周期
+
+```kotlin
+// 1. Turn 开始 (session.status → busy)
+sessionManager.onTurnStart()
+  → isBusy = true
+  → 清空 aiEditedFiles, userEditedFiles, pendingDiffs
+  → 创建 LocalHistory 基准
+
+// 2. 编辑追踪
+sessionManager.onFileEdited(path)  // AI 编辑 (来自 file.edited SSE)
+documentListener                    // 用户编辑 (自动检测)
+
+// 3. Turn 结束 (session.idle)
+sessionManager.onTurnEnd()
+  → isBusy = false
+
+// 4. Diff 展示 (OpenCodeService 触发)
+fetchAndShowDiffs()
+  → GET /session/:id/diff?messageID=xxx
+  → sessionManager.processDiffs(serverDiffs)
+  → diffViewerService.showMultiFileDiff(entries)
+```
+
+---
+
 ## 未来路线图
 
 ### 1. 细粒度（片段级）归因

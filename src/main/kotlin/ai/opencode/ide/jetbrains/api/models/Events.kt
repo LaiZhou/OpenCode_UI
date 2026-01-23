@@ -23,18 +23,7 @@ data class SessionDiffEvent(
 data class SessionDiffProperties(
     val sessionID: String,
     val diff: List<FileDiff>
-) {
-    /**
-     * Convert to DiffBatch for proper tracking.
-     */
-    fun toDiffBatch(): DiffBatch {
-        return DiffBatch(
-            sessionId = sessionID,
-            messageId = null,
-            diffs = diff
-        )
-    }
-}
+)
 
 /**
  * Event fired when a session becomes idle (conversation turn complete).

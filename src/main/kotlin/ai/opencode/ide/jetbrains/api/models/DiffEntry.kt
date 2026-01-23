@@ -1,87 +1,36 @@
 package ai.opencode.ide.jetbrains.api.models
 
 /**
- * Represents a diff entry with full context for operations.
+ * Represents a pending diff for a single file.
  *
- * Each DiffEntry contains:
- * - The file diff data (before/after content)
- * - The session ID that produced this diff
- * - The message ID for revert operations (resolved from message.part.updated)
- * - Optional part ID for granular revert
+ * Lifecycle:
+ * 1. Created when Server produces a diff (via SSE or API)
+ * 2. Displayed in DiffViewer
+ * 3. Removed when user Accepts or Rejects
  *
- * This allows proper tracking and operations on individual diffs.
+ * @property file Relative path from project root (always normalized with forward slashes)
+ * @property diff The actual file diff content
+ * @property hasUserEdits True if user also edited this file during the AI turn
+ * @property resolvedBefore The resolved "before" content (from LocalHistory or server).
+ *                          Must be set on background thread before showing diff.
  */
 data class DiffEntry(
-    val sessionId: String,
-    val messageId: String?,
-    val partId: String?,
+    val file: String,
     val diff: FileDiff,
-    val timestamp: Long = System.currentTimeMillis()
+    val hasUserEdits: Boolean = false,
+    val resolvedBefore: String? = null,
+    val isCreatedExplicitly: Boolean = false
 ) {
-    /**
-     * Unique key for this diff entry.
+    /** 
+     * True if this is a newly created file. 
+     * Must satisfy BOTH:
+     * 1. VFS detected a creation event (physical creation).
+     * 2. Server Diff says there was no content before (logical creation).
+     * This prevents "Replace" operations (Delete+Create) from being treated as New Files,
+     * ensuring Reject restores the original content instead of deleting the file.
      */
-    val key: String
-        get() = "$sessionId:${diff.file}"
-
-    /**
-     * Check if this diff can be reverted (has messageId).
-     */
-    fun canRevert(): Boolean = messageId != null
-}
-
-/**
- * Container for a batch of diffs from a single session/message.
- *
- * When OpenCode produces diffs, they come as a batch per session.
- * Message IDs are resolved from message.part.updated events when available.
- */
-data class DiffBatch(
-    val sessionId: String,
-    val messageId: String?,
-    val diffs: List<FileDiff>,
-    val timestamp: Long = System.currentTimeMillis()
-) {
-    /**
-     * Convert to individual DiffEntry list.
-     */
-    fun toEntries(): List<DiffEntry> {
-        return diffs.map { diff ->
-            DiffEntry(
-                sessionId = sessionId,
-                messageId = messageId,
-                partId = null,  // Will be set if we get part-level info
-                diff = diff,
-                timestamp = timestamp
-            )
-        }
-    }
-
-    /**
-     * Get summary statistics.
-     */
-    fun getSummary(): DiffBatchSummary {
-        return DiffBatchSummary(
-            sessionId = sessionId,
-            messageId = messageId,
-            fileCount = diffs.size,
-            totalAdditions = diffs.sumOf { it.additions },
-            totalDeletions = diffs.sumOf { it.deletions }
-        )
-    }
-}
-
-/**
- * Summary of a diff batch for display.
- */
-data class DiffBatchSummary(
-    val sessionId: String,
-    val messageId: String?,
-    val fileCount: Int,
-    val totalAdditions: Int,
-    val totalDeletions: Int
-) {
-    override fun toString(): String {
-        return "$fileCount file(s), +$totalAdditions -$totalDeletions"
-    }
+    val isNewFile: Boolean get() = isCreatedExplicitly && diff.before.isEmpty()
+    
+    /** Get the before content: prefer resolved, fallback to server-provided */
+    val beforeContent: String get() = resolvedBefore ?: diff.before
 }

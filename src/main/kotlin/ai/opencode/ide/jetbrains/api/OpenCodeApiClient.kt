@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 /**
  * HTTP client for OpenCode Server API.
  */
-class OpenCodeApiClient(
+open class OpenCodeApiClient(
     private val hostname: String, 
     private val port: Int,
     private val username: String? = null,
@@ -24,7 +24,8 @@ class OpenCodeApiClient(
     private val logger = Logger.getInstance(OpenCodeApiClient::class.java)
     private val baseUrl = "http://$hostname:$port"
 
-    private val client = OkHttpClient.Builder()
+    // Make client protected so subclasses can potentially use it or override methods
+    protected val client = OkHttpClient.Builder()
         .proxy(java.net.Proxy.NO_PROXY)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -65,7 +66,7 @@ class OpenCodeApiClient(
         return getSessionStatuses(directory).find { it.status.isBusy() }
     }
 
-    fun getSessionDiff(sessionId: String, directory: String, messageId: String? = null): List<FileDiff> {
+    open fun getSessionDiff(sessionId: String, directory: String, messageId: String? = null): List<FileDiff> {
         val serverPath = PathUtil.toOpenCodeServerPath(directory)
         var url = "$baseUrl/session/$sessionId/diff?directory=${encode(serverPath)}"
         if (messageId != null) url += "&messageID=$messageId"
@@ -76,7 +77,7 @@ class OpenCodeApiClient(
     /**
      * Get a specific session by ID.
      */
-    fun getSession(sessionId: String, directory: String): Session? {
+    open fun getSession(sessionId: String, directory: String): Session? {
         val serverPath = PathUtil.toOpenCodeServerPath(directory)
         val url = "$baseUrl/session/$sessionId?directory=${encode(serverPath)}"
         return get(url, Session::class.java)

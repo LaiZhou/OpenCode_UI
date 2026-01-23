@@ -9,13 +9,10 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.progress.ProgressManager
-import com.intellij.openapi.progress.Task
 import com.intellij.openapi.ui.Messages
 
 private fun findEntryIndex(entries: List<DiffEntry>, filePath: String): Int {
-    val idx = entries.indexOfFirst { it.diff.file == filePath }
+    val idx = entries.indexOfFirst { it.file == filePath }
     return if (idx >= 0) idx else 0
 }
 
@@ -66,12 +63,15 @@ class AcceptFromDiffEditorAction(private val filePath: String) : AnAction() {
         val before = sessionManager.getAllDiffEntries()
         val previousIndex = findEntryIndex(before, filePath)
 
-        // SessionManager.acceptDiff returns Unit, not Boolean
         val entry = sessionManager.getDiffForFile(filePath)
         if (entry != null) {
-            sessionManager.acceptDiff(entry)
-            ApplicationManager.getApplication().invokeLater {
-                openNextDiff(project, previousIndex, e)
+            // Use the callback to navigate after accept completes
+            sessionManager.acceptDiff(entry) { success ->
+                if (success) {
+                    openNextDiff(project, previousIndex, e)
+                } else {
+                    Messages.showWarningDialog(project, "Failed to stage $filePath", "Accept Failed")
+                }
             }
         } else {
             ApplicationManager.getApplication().invokeLater {
@@ -100,18 +100,30 @@ class RejectFromDiffEditorAction(private val filePath: String) : AnAction() {
         val sessionManager = project.service<SessionManager>()
         val entry: DiffEntry = sessionManager.getDiffForFile(filePath) ?: return
 
-        // Provide more context in the confirmation dialog
-        val isNewFile = entry.diff.before.isEmpty()
-        val message = if (isNewFile) {
-            "Delete new file '${entry.diff.file}'?\n\nThis file was created by OpenCode and will be removed."
-        } else {
-            "Reject changes to '${entry.diff.file}'?\n\nThe file will be restored to its state before OpenCode modified it."
+        // Build confirmation message based on file state
+        val isNewFile = entry.isNewFile
+        val hasUserEdits = entry.hasUserEdits
+        
+        val message = buildString {
+            if (isNewFile) {
+                append("Delete new file '${entry.file}'?\n\n")
+                append("This file was created by OpenCode and will be removed.")
+            } else {
+                append("Reject changes to '${entry.file}'?\n\n")
+                append("The file will be restored to its state before OpenCode modified it.")
+            }
+            
+            // Per design doc: warn if user has edits in this file
+            if (hasUserEdits) {
+                append("\n\n")
+                append("WARNING: You have also edited this file. Your changes will be lost!")
+            }
         }
 
         val confirm = Messages.showYesNoDialog(
             project,
             message,
-            "Confirm Reject",
+            if (hasUserEdits) "Confirm Reject (Data Loss Warning)" else "Confirm Reject",
             Messages.getQuestionIcon()
         )
 
@@ -120,20 +132,14 @@ class RejectFromDiffEditorAction(private val filePath: String) : AnAction() {
         val before = sessionManager.getAllDiffEntries()
         val previousIndex = findEntryIndex(before, filePath)
 
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, "OpenCode: Rejecting changes", false) {
-            override fun run(indicator: ProgressIndicator) {
-                // rejectDiff now takes DiffEntry and runs on EDT internally if needed, but we call it from background
-                // Wait, rejectDiff uses invokeLater for VFS ops.
-                // It returns Unit.
-                sessionManager.rejectDiff(entry)
-            }
-
-            override fun onSuccess() {
-                // Since rejectDiff is async (uses invokeLater for VFS), we can't easily know "success" here.
-                // But for now, we assume it proceeds. The SessionManager logs errors.
+        // Use the callback to navigate after reject completes (no more ProgressManager race)
+        sessionManager.rejectDiff(entry) { success ->
+            if (success) {
                 openNextDiff(project, previousIndex, e)
+            } else {
+                Messages.showWarningDialog(project, "Failed to restore $filePath", "Reject Failed")
             }
-        })
+        }
     }
 
     override fun update(e: AnActionEvent) {

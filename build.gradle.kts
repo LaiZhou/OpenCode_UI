@@ -29,6 +29,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
     implementation("com.google.code.gson:gson:2.11.0")
+    
+    testImplementation("junit:junit:4.13.2")
 }
 
 intellijPlatform {
@@ -41,9 +43,10 @@ intellijPlatform {
         changeNotes = """
             <h2>1.0.6</h2>
             <ul>
-              <li>Simplified diff workflow to rely on working tree state and explicit file.edited events.</li>
-              <li>Diffs are skipped (with notice) when no file.edited events are received.</li>
-              <li>Accept action now stages disk content without overwriting files.</li>
+              <li>Fix: Resolved missing diffs for file deletions/creations (added VFS listener & active refresh).</li>
+              <li>Fix: Eliminated "ghost diffs" from previous turns (strict turn isolation).</li>
+              <li>Fix: Improved "New File" detection to prevent accidental data loss during Reject.</li>
+              <li>Fix: Resolved Git errors when accepting deletion of untracked files.</li>
             </ul>
         """.trimIndent()
     }
