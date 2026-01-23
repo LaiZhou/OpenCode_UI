@@ -264,8 +264,9 @@ open class SessionManager(private val project: Project) : Disposable {
     /**
      * Resolve the "before" content for a file using a snapshot's baseline.
      */
-    fun resolveBeforeContent(relativePath: String, serverBefore: String, snapshot: TurnSnapshot): String {
+    fun resolveBeforeContent(relativePath: String, diff: FileDiff, snapshot: TurnSnapshot): String {
         val absPath = PathUtil.resolveProjectPath(project, relativePath)
+        val serverBefore = diff.before
 
         // 1. Try LocalHistory (Baseline)
         if (snapshot.baselineLabel != null && absPath != null) {
@@ -279,12 +280,14 @@ open class SessionManager(private val project: Project) : Disposable {
         }
         
         // 2. Fallback: If Server Before is empty but file exists on disk -> Read Disk
-        // This handles "Reject -> Delete Again" scenario where Server thinks file is gone
-        if (serverBefore.isEmpty() && absPath != null) {
+        // CRITICAL: Only do this if 'After' is also empty (Delete intent).
+        // If 'After' has content (Create/Modify), disk likely contains AI's new content,
+        // so reading it would incorrectly set Before == After, hiding the diff.
+        if (serverBefore.isEmpty() && diff.after.isEmpty() && absPath != null) {
             try {
                 val file = File(absPath)
                 if (file.exists()) {
-                    logger.info("[Turn #${snapshot.turnNumber}] Server before is empty but file exists. Using disk content as before.")
+                    logger.info("[Turn #${snapshot.turnNumber}] Server before is empty but intent is Delete. Using disk content as before.")
                     return file.readText()
                 }
             } catch (e: Exception) {

@@ -336,7 +336,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                     if (entries.isNotEmpty()) {
                         // Resolve before content on background thread
                         val resolvedEntries = entries.map { entry ->
-                            entry.copy(resolvedBefore = sessionManager.resolveBeforeContent(entry.file, entry.diff.before, snapshot))
+                            entry.copy(resolvedBefore = sessionManager.resolveBeforeContent(entry.file, entry.diff, snapshot))
                         }
                         logger.info("[OpenCode] Turn #${snapshot.turnNumber} Showing ${resolvedEntries.size} diffs")
                         invokeLater {

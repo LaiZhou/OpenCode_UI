@@ -188,6 +188,39 @@ class OpenCodeLogicTest {
             
             // Cleanup
             file.delete()
+            
+            println("\n--------------------------------------------------")
+            println("TEST: Scenario F: Create File (Safety Check)")
+            println("--------------------------------------------------")
+            
+            // Validate that we DO NOT read disk content as Before for NEW files
+            // even if the file already exists on disk (AI wrote it).
+            
+            r.resetState()
+            
+            // 1. Simulate AI writing a new file to disk
+            val newFile = java.io.File(tempDir, "new.kt")
+            newFile.writeText("fun new() {}")
+            println("  Step 1: AI created file at ${newFile.absolutePath}")
+            
+            // 2. Start Turn
+            s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"busy"}}}""")
+            s.broadcast("""{"type":"file.edited","properties":{"file":"new.kt"}}""")
+            s.broadcast("""{"type":"message.updated","properties":{"info":{"id":"msg-8","sessionID":"s1","role":"assistant"}}}""")
+            
+            // 3. Server says it's a new file (before="", after="fun new() {}")
+            s.setDiffResponse("msg-8", """[{"file":"new.kt","before":"","after":"fun new() {}","additions":1,"deletions":0}]""")
+            
+            // 4. End Turn
+            s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"idle"}}}""")
+            
+            // 5. Verify
+            // Expect Diff to be SHOWN as a CREATE (Before empty), NOT empty diff.
+            r.waitForDiffs(1)
+            r.assertDiffContent("new.kt", "") // Before should be empty!
+            println("✓ Passed")
+            
+            newFile.delete()
 
             println("\nAll tests passed!")
             
