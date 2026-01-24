@@ -35,6 +35,14 @@ Layer 1: Mock IDE + Fake Server (OpenCodeLogicTest)
 | **Scenario D: Race Condition** | Turn 1 结束触发 Fetch，Turn 2 立即开始 | 模拟网络延迟，验证 Snapshot 机制能正确处理这种竞态。 |
 | **Scenario E: Delete -> Reject -> Delete** | 恢复被删文件后再次被删 | 验证 Memory Snapshot (Known State) 能正确恢复 Before 内容。 |
 | **Scenario F: New File Safety** | AI 新建文件 | 验证 Disk Fallback 逻辑不会错误地读取新文件作为 Before (导致 Diff 消失)。 |
+| **Scenario G: User Edit Rescue Safety** | 用户修改文件 + VFS Change | 验证 Rescue 逻辑严格排除用户修改的文件。 |
+| **Scenario H: Ghost Diff Prevention** | Server 漏报 + 物理存在 | 验证如果文件在磁盘上仍然存在，即使 Server 漏报也不进行 Rescue（信任 Server）。 |
+| **Scenario I: Empty-Empty Prevention** | Server 返回空 Diff | 验证如果 Before 和 After 均为空，不显示 Diff 框。 |
+| **Scenario J: Pre-emptive Capture** | 模拟 LocalHistory 失效 | 验证 VFS 事件触发的 Pre-emptive Capture 能正确提供 Before 内容。 |
+| **Scenario K: Rescue New File** | Server 漏报 + 新建文件 | 验证当 Server 漏报但 VFS 确认新建时，通过 VFS 亲和力展示 Diff。 |
+| **Scenario L: Rescue Deletion** | Server 漏报 + 物理删除 | 验证当文件物理消失且 Server 漏报时，系统能自动补救并显示删除 Diff。 |
+| **Scenario M: Mod Rescue Skipped** | Server 漏报 + 普通修改 | 验证普通修改如果 Server 没报，绝不进行 Rescue（防止误报用户修改）。 |
+| **Scenario N: Server Authoritative** | 无 VFS 信号 + Server Diff | 验证只要有 SSE 声明，即使 VFS 没捕获到（如远程修改），Server Diff 也能显示。 |
 
 ### 2. 真实集成测试 (`RealProcessIntegrationTest`)
 
@@ -64,7 +72,7 @@ Layer 1: Mock IDE + Fake Server (OpenCodeLogicTest)
 
 本节详细分析 Turn 隔离的内部逻辑流。
 
-### 核心数据流
+### 核心数据流 (2026-01-24 Update)
 
 ```mermaid
 sequenceDiagram
@@ -75,25 +83,28 @@ sequenceDiagram
 
     SSE->>SessionManager: session.status(busy)
     SessionManager->>SessionManager: onTurnStart()
-    SessionManager->>SessionManager: Swap aiEditedFiles (New Set)
     
-    SSE->>SessionManager: file.edited(A.kt)
-    SessionManager->>SessionManager: aiEditedFiles.add(A.kt)
+    par Signal Separation
+        SessionManager->>SessionManager: Capture VFS Changes -> vfsChangedFiles
+        SSE->>SessionManager: file.edited -> serverEditedFiles
+    and Pre-emptive Capture
+        SessionManager->>SessionManager: beforeContentsChange -> capturedBeforeContent
+    end
     
     SSE->>SessionManager: session.status(idle)
     SessionManager->>Snapshot: onTurnEnd() -> Create TurnSnapshot
-    Note right of Snapshot: Holds ref to aiEditedFiles (Set A)
+    Note right of Snapshot: Holds vfsChangedFiles, serverEditedFiles, capturedBeforeContent
     
     SessionManager->>DiffViewer: processDiffs(Snapshot)
-    DiffViewer->>DiffViewer: Map context (UserEdits, IsNew) using Snapshot
+    DiffViewer->>DiffViewer: Resolve Before using Captured Content
 ```
 
 ### 关键机制
 
 1.  **TurnSnapshot**: 在 Turn 结束时创建不可变快照，后续的 Diff 拉取和处理完全依赖此快照。
-2.  **Set Swapping**: 在 `onTurnStart` 时替换 `aiEditedFiles` 集合引用，物理隔离新旧 Turn 的状态。
-3.  **Server Authoritative**: 信任 Server 返回的 Diff 数据，不因 VFS 事件缺失而过滤。
-4.  **Active VFS Refresh**: 在处理 Diff 前主动刷新 VFS，消除文件系统延迟。
+2.  **Signal Separation**: 严格区分 VFS 物理变更和 Server 逻辑声明，仅对交集进行 Rescue，防止误判用户操作。
+3.  **Pre-emptive Capture**: 利用 VFS 事件抢占式捕获变更前的内容，解决时序竞态问题。
+4.  **Safe Rescue**: 对 Rescue 逻辑实施严格的 Ghost Diff 防御（禁止凭空捏造修改）。
 
 ---
 

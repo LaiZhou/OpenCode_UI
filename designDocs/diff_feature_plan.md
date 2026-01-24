@@ -24,9 +24,10 @@ sequenceDiagram
 
     Server->>SSE: session.status(busy)
     SSE->>OCS: session.status
-    OCS->>SM: onSessionStatusChanged
-    SM->>SM: 清空编辑列表 (AI & User)
+    OCS->>SM: onTurnStart
+    SM->>SM: 清空 userEditedFiles
     SM->>SM: 创建 LocalHistory 标签
+    Note right of SM: Gap Event Capture: 保留 vfsChangedFiles/serverEditedFiles
 
     Note over DL, Disk: 用户在 IDE 中输入
     DL->>SM: 检测用户编辑
@@ -46,7 +47,8 @@ sequenceDiagram
     SSE->>OCS: attemptBarrierTrigger
     OCS->>OCS: 等待 Idle + ID/Payload
     OCS->>Server: getSessionDiff(messageID)
-    OCS->>SM: 过滤/解析 diffs (Server Authoritative)
+    OCS->>SM: getProcessedDiffs(serverDiffs, snapshot)
+    Note right of SM: 集中处理 Rescue, Resolution, Filtering
     SM->>Disk: 读取当前内容 (已合并)
     SM->>Diff: 展示 diff 链 (标注 OpenCode + User)
 
@@ -78,10 +80,11 @@ sequenceDiagram
 
 - **Idle 阶段**:
   - **Strict Barrier**: 等待 Idle + ID/Payload。
-  - **Baseline Resolution (三级回退)**:
-    1. **LocalHistory**: 首选。
-    2. **Known State**: 内存快照 (处理 Reject 后的状态丢失)。
-    3. **Disk Fallback**: 仅当 Server 意图为删除 (`After=""`) 且 `Before=""` 时读取磁盘 (防止新建文件误判)。
+  - **Baseline Resolution (四级回退)**:
+    1. **Pre-emptive Capture (`capturedBeforeContent`)**: 最高优先级。Turn 开始前通过 VFS 事件捕获的内容。
+    2. **LocalHistory**: 通过 Turn Start 时的 Label 回溯。
+    3. **Known State**: 内存快照 (处理 Reject 后的状态丢失)。
+    4. **Disk Fallback**: 仅当 Server 意图为删除 (`After=""`) 且 `Before=""` 时读取磁盘 (防止新建文件误判)。
   - **Content Filtering**: 过滤 `Before == After` 的文件，除非触发 **VFS Rescue**。
 
 - **展示**: 使用 DiffManager 多文件链展示。
@@ -113,44 +116,116 @@ sequenceDiagram
 
 ## 已知问题与缓解措施
 
-- **缺少 `messageID`**: Diff 拉取被跳过，除非有缓存的 `session.diff` payload 可用。
+- **缺少 `messageID`**: 触发 Barrier Timeout (2秒)，使用 session summary 或 SSE payload 作为回退。
 - **Server 中文文件名编码**: 由 `FileDiffDeserializer` 处理。
-- **LocalHistory 查找失败**: 回退顺序为 Server `before` → Git HEAD → 空字符串。
+- **LocalHistory 查找失败**: 回退顺序为 Known State (内存) → Disk Fallback (仅删除意图) → Server Before。
+- **Ghost Diff**: 使用 `Before == After` 过滤，VFS Rescue 防止误过滤真实删除。
+- **Late Baseline 竞态**: 通过 Gap Event Capture (VFS 事件轮转在 Turn End) 解决。
 
 ---
 
-## 实现细节 (2026-01-23 策略更新)
+## 实现细节 (2026-01-24 架构终局)
 
-### 核心架构重构
+### 核心架构：信号分离与抢占式捕获
+
+我们构建了一个分层防御体系，旨在从根本上解决时序竞态和信号混淆问题。
+
+#### 1. 信号分离与保守补救 (Signal Separation & Conservative Rescue)
+
+SessionManager 严格区分以下信号：
+*   **VFS 变更 (`vfsChangedFiles`)**: 物理层面的文件变化。
+*   **Server 声明 (`serverEditedFiles`)**: AI 明确声明其修改了的文件（通过 SSE `file.edited` 事件）。
+*   **用户编辑 (`userEditedFiles`)**: IDE 检测到的用户手动输入。
+
+**Conservative Rescue 策略** (2026-01-24 修复):
+
+为了防止误报（如用户操作被误归因为 AI），Rescue 需要满足严格的 AI 亲和力条件：
+
+**共同前提**：
+*   Server API 返回的 Diff 列表中不包含该文件
+*   文件不在 `userEditedFiles` 列表中（排除用户操作）
+
+**删除文件 Rescue** (`!exists`):
+1.  有 `capturedBeforeContent` (我们知道原始内容，可以安全恢复)
+2.  或 Server 通过 `file.edited` SSE 声明过该文件 (`serverEditedFiles`)
+
+**新建文件 Rescue** (`exists && isVfsCreated`):
+*   **必须同时满足** VFS 检测到创建 (`aiCreatedFiles`) + Server SSE 声明 (`serverEditedFiles`)
+*   仅 VFS 创建事件不足以 Rescue，因为无法区分 AI 创建和用户创建
+
+**修改文件**：
+*   不进行 Rescue。如果 Server API 没报，即便 VFS 有变更，也视为外部干扰或用户操作。
+
+此策略有效解决了：
+*   Ghost Diffs（无实质变更的 Diff）
+*   用户手动编辑被 AI 抢功
+*   用户新建文件被误归因为 AI
+
+#### 3. 过滤策略 (Filtering Strategy)
+
+为了平衡 Diff 的可见性与安全性，我们采用 "Server Authoritative with Affinity Check" 策略。
+
+*   **核心原则**:
+    *   **API 信任**: 我们优先获取 Server API 返回的 Diff。
+    *   **亲和力校验 (Affinity Check)**: 为了防止 Server 返回上一轮的旧数据（Stale Diffs），我们要求每个文件必须在当前 Turn 有“生命迹象”。
+    *   **有效信号**: SSE 声明 (`serverEditedFiles`) **或** VFS 物理变动 (`vfsChangedFiles`/`captured`/`aiCreated`)。
+    *   **规则**: `if (!isServerClaimed && !isVfsTouched) -> SKIP`。
+
+*   **强制过滤条件 (Hard Filters)**:
+    1.  **用户冲突 (User Safety)**:
+        *   `if (isUserEdited) -> SKIP`: 如果检测到用户在当前 Turn 内手动编辑了该文件，**绝对不显示**。这是最高优先级规则。
+    2.  **无实质变更 (Ghost Diffs)**:
+        *   `if (Before == After) -> SKIP`: 如果解析出的“修改前”内容与当前磁盘内容完全一致，视为无效 Diff，不予显示。
+
+*   **Turn 隔离 (Strict Isolation)**:
+    *   在 `onTurnStart` 时强制清空所有变更集合，确保上一轮的滞后信号绝不会污染当前轮次。这使得亲和力校验能够精准工作。
+
+---
+
+## 核心架构重构 (旧版存档)
 
 重构后的架构遵循 "Server Authoritative" 原则：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                       OpenCodeService                            │
-│  (SSE 事件分发, Turn 生命周期触发, API 调用)                     │
+│  (SSE 事件分发, Turn 生命周期触发, API 调用, Barrier 协调)       │
 ├─────────────────────────────────────────────────────────────────┤
 │  handleEvent()                                                   │
 │    ├─ session.status(busy)  → sessionManager.onTurnStart()       │
+│    │                          clearTurnState()                   │
 │    ├─ file.edited           → sessionManager.onFileEdited()      │
-│    ├─ session.idle          → sessionManager.onTurnEnd()         │
-│    │                           + fetchAndShowDiffs()             │
-│    └─ message.updated       → cache messageID for fetch          │
+│    ├─ session.status(idle)  → sessionManager.onTurnEnd()         │
+│    │   session.idle           + turnSnapshots[sId] = snapshot    │
+│    │                          attemptBarrierTrigger()            │
+│    ├─ message.updated       → recordTurnMessageId()              │
+│    └─ session.diff          → turnPendingPayloads[sId] = diffs   │
+│                                                                  │
+│  Barrier Logic:                                                  │
+│    - Wait for (Idle + MessageID) or (Idle + Payload)             │
+│    - Timeout: 2000ms → force fetch                               │
+│    - Debounce: 1500ms between triggers                           │
 └─────────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       SessionManager                             │
-│  (Turn 状态, Diff 存储, Accept/Reject 操作)                      │
+│  (Turn 状态, Diff 处理, Baseline 解析, Accept/Reject 操作)       │
 ├─────────────────────────────────────────────────────────────────┤
 │  Turn State:                                                     │
+│    - turnNumber: Int (单调递增隔离)                              │
 │    - isBusy: Boolean                                             │
 │    - baselineLabel: Label (LocalHistory 基准)                    │
-│    - aiEditedFiles: Set<String> (用于上下文，非过滤)             │
-│    - userEditedFiles: Set<String> (用于冲突检测)                 │
+│    - aiEditedFiles: ConcurrentSet (VFS 检测, Gap Event Capture)  │
+│    - aiCreatedFiles: ConcurrentSet (新建文件检测)                │
+│    - userEditedFiles: ConcurrentSet (冲突检测)                   │
+│    - lastKnownFileStates: Map (Reject 后的内存快照)              │
 │                                                                  │
 │  Core APIs:                                                      │
-│    - processDiffs(serverDiffs): 信任 Server Diff，注入 VFS 上下文│
+│    - onTurnStart(): Boolean (开始新 Turn)                        │
+│    - onTurnEnd(): TurnSnapshot? (创建不可变快照)                 │
+│    - processDiffs(serverDiffs, snapshot): List<DiffEntry>        │
+│    - resolveBeforeContent(path, diff, snapshot): String          │
 │    - acceptDiff(entry, callback): 异步 git add                   │
 │    - rejectDiff(entry, callback): 异步恢复文件                   │
 └─────────────────────────────────────────────────────────────────┘
@@ -169,15 +244,26 @@ sequenceDiagram
 
 ### 简化的数据模型
 
-**DiffEntry** (重构后):
+**DiffEntry** (当前实现):
 
 ```kotlin
 data class DiffEntry(
-    val file: String,           // 相对路径 (规范化)
-    val diff: FileDiff,         // 文件差异内容
-    val hasUserEdits: Boolean   // 用户是否也编辑过
+    val file: String,                    // 相对路径 (规范化)
+    val diff: FileDiff,                  // 文件差异内容
+    val hasUserEdits: Boolean = false,   // 用户是否也编辑过
+    val resolvedBefore: String? = null,  // 解析后的 Before 内容 (来自 LocalHistory 或内存快照)
+    val isCreatedExplicitly: Boolean = false  // VFS 是否检测到创建事件
 ) {
-    val isNewFile: Boolean get() = diff.before.isEmpty()
+    /** 
+     * 判断是否为新建文件。必须同时满足:
+     * 1. VFS 检测到创建事件 (物理创建)
+     * 2. Server Diff 表明之前没有内容 (逻辑创建)
+     * 这防止 "Replace" 操作 (Delete+Create) 被误判为新文件。
+     */
+    val isNewFile: Boolean get() = isCreatedExplicitly && diff.before.isEmpty()
+    
+    /** 获取 Before 内容: 优先使用解析值，回退到 Server 值 */
+    val beforeContent: String get() = resolvedBefore ?: diff.before
 }
 ```
 
@@ -213,28 +299,51 @@ WARNING: You have also edited this file. Your changes will be lost!
 
 对话框标题变更为 "Confirm Reject (Data Loss Warning)" 以强调风险。
 
-### Turn 生命周期
+### Turn 生命周期与 Snapshot 机制
 
 ```kotlin
 // 1. Turn 开始 (session.status → busy)
-sessionManager.onTurnStart()
+sessionManager.onTurnStart(): Boolean
+  → turnNumber++
   → isBusy = true
-  → 清空 aiEditedFiles, userEditedFiles, pendingDiffs
-  → 创建 LocalHistory 基准
+  → 清空 userEditedFiles
+  → 创建 LocalHistory 基准标签
+  → 注意: aiEditedFiles/aiCreatedFiles 不在此清空 (Gap Event Capture)
 
 // 2. 编辑追踪
 sessionManager.onFileEdited(path)  // AI 编辑 (来自 file.edited SSE)
-documentListener                    // 用户编辑 (自动检测)
+VFS Listener                        // 自动检测文件系统变更
+documentListener                    // 用户编辑 (IDE 内自动检测)
 
 // 3. Turn 结束 (session.idle)
-sessionManager.onTurnEnd()
+sessionManager.onTurnEnd(): TurnSnapshot?
   → isBusy = false
+  → 创建 TurnSnapshot (不可变快照)
+  → 轮转 aiEditedFiles/aiCreatedFiles 为新集合 (Gap Event Capture)
+  → 返回 Snapshot 供后续处理使用
 
 // 4. Diff 展示 (OpenCodeService 触发)
-fetchAndShowDiffs()
+fetchAndShowDiffs(sessionId, snapshot)
   → GET /session/:id/diff?messageID=xxx
-  → sessionManager.processDiffs(serverDiffs)
+  → forceVfsRefresh(diffs + knownFiles) // 确保物理删除也能被检测到
+  → sessionManager.getProcessedDiffs(serverDiffs, snapshot, lateVfsEvents)
+      → VFS Rescue (Synthetic Diffs)
+      → Resolve Before Content
+      → Filtering (Signal Affinity, User Safety, Content)
   → diffViewerService.showMultiFileDiff(entries)
+```
+
+**TurnSnapshot** (不可变状态快照):
+
+```kotlin
+data class TurnSnapshot(
+    val turnNumber: Int,
+    val aiEditedFiles: Set<String>,      // VFS 检测到的 AI 编辑
+    val aiCreatedFiles: Set<String>,     // VFS 检测到的新建文件
+    val userEditedFiles: Set<String>,    // IDE 检测到的用户编辑
+    val baselineLabel: Label?,           // LocalHistory 基准
+    val knownFileStates: Map<String, String> // Reject 后的已知状态
+)
 ```
 
 ---

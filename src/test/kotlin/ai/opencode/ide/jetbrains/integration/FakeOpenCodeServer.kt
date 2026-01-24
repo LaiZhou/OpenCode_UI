@@ -13,6 +13,9 @@ class FakeOpenCodeServer(val port: Int) {
     private val diffResponses = ConcurrentHashMap<String, String>()
     private val diffDelays = ConcurrentHashMap<String, Long>()
     
+    val activePort: Int
+        get() = server.address.port
+
     init {
         // Catch-all handler for debugging
         server.createContext("/") { ex ->

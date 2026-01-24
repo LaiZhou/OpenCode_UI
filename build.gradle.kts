@@ -43,10 +43,10 @@ intellijPlatform {
         changeNotes = """
             <h2>1.0.6</h2>
             <ul>
-              <li>Fix: Critical fix for missing diffs on file deletion (Gap Event Capture & VFS Rescue).</li>
-              <li>Fix: Eliminated "ghost diffs" from previous turns (Content-based filtering).</li>
-              <li>Fix: Robust handling of "Reject -> Delete Again" scenarios (Memory Snapshot).</li>
-              <li>Fix: Resolved missing diffs for new files (Server Authoritative).</li>
+              <li>Fix: Strict turn isolation to prevent "ghost diffs" from previous turns appearing in new messages.</li>
+              <li>Fix: Robust handling of file deletions (Improved Rescue logic with LocalHistory fallback).</li>
+              <li>Fix: Ensured diffs for basic modifications appear even if server signals are delayed.</li>
+              <li>Fix: Resolved missing diffs for new files by trusting Server API signals.</li>
             </ul>
         """.trimIndent()
     }

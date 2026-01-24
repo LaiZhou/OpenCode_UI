@@ -71,7 +71,17 @@ open class OpenCodeApiClient(
         var url = "$baseUrl/session/$sessionId/diff?directory=${encode(serverPath)}"
         if (messageId != null) url += "&messageID=$messageId"
         val type = object : TypeToken<List<FileDiff>>() {}.type
-        return get(url, type) ?: emptyList()
+        val diffs = get<List<FileDiff>>(url, type) ?: emptyList()
+        
+        if (diffs.isNotEmpty()) {
+            logger.info("[API] Received ${diffs.size} diffs for session $sessionId")
+            diffs.forEach { d ->
+                val b = if (d.before.length > 20) d.before.take(20) + "..." else d.before.replace("\n", "\\n")
+                val a = if (d.after.length > 20) d.after.take(20) + "..." else d.after.replace("\n", "\\n")
+                logger.debug("  Diff: ${d.file} | Before[${d.before.length}]: '$b' | After[${d.after.length}]: '$a'")
+            }
+        }
+        return diffs
     }
 
     /**

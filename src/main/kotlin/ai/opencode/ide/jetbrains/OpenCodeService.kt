@@ -53,6 +53,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         private const val OPEN_CODE_TAB_PREFIX = "OpenCode"
         private const val RETRY_INTERVAL_MS = 5000L
         private const val BARRIER_TIMEOUT_MS = 2000L
+        internal var DEBOUNCE_MS = 1500L
     }
 
     private var hostname: String = "127.0.0.1"
@@ -269,7 +270,7 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     private fun triggerDiffFetch(sessionId: String, snapshot: TurnSnapshot) {
         val now = System.currentTimeMillis()
-        if (now - (turnLastTriggerTimes[sessionId] ?: 0) < 1500) {
+        if (now - (turnLastTriggerTimes[sessionId] ?: 0) < DEBOUNCE_MS) {
             logger.debug("[OpenCode] Turn #${snapshot.turnNumber} Debounced (too soon)")
             return
         }
@@ -312,12 +313,12 @@ class OpenCodeService(private val project: Project) : Disposable {
                 if (messageId != null) {
                     logger.info("[OpenCode] Turn #${snapshot.turnNumber} Fetching diffs for messageId: $messageId")
                     diffs = client.getSessionDiff(sessionId, path, messageId)
-                    logger.info("[OpenCode] Turn #${snapshot.turnNumber} API returned ${diffs.size} diffs")
+                    logger.info("[OpenCode] Turn #${snapshot.turnNumber} Server returned ${diffs.size} diffs: ${diffs.map { "${it.file}(+${it.additions}/-${it.deletions})" }}")
                 }
                 
                 // Priority 2: Use cached SSE payload
                 if (diffs.isEmpty() && payload != null) {
-                    logger.info("[OpenCode] Turn #${snapshot.turnNumber} Using SSE payload (${payload.size} files)")
+                    logger.info("[OpenCode] Turn #${snapshot.turnNumber} Using SSE payload (${payload.size} files): ${payload.map { it.file }}")
                     diffs = payload
                 }
                 
@@ -327,45 +328,34 @@ class OpenCodeService(private val project: Project) : Disposable {
                     client.getSession(sessionId, path)?.summary?.diffs?.let { diffs = it }
                 }
                 
-                // Process using the snapshot
-                if (diffs.isNotEmpty()) {
-                    // Force VFS refresh to ensure we catch all disk changes immediately
-                    forceVfsRefresh(diffs)
+                // 1. Force VFS refresh for Server files and Known files BEFORE processing
+                // This ensures we catch deletions of files that Server missed but AI previously touched.
+                // We rely on Server Authoritative logic: if Server missed a file and we have no history of it, we skip it.
+                val serverFiles = diffs.map { it.file }
+                val knownFiles = sessionManager.getKnownFilePaths()
+                val filesToRefresh = (serverFiles + knownFiles).distinct()
+                
+                if (filesToRefresh.isNotEmpty()) {
+                    // Create dummy FileDiffs just to pass the filename
+                    forceVfsRefresh(filesToRefresh.map { FileDiff(it, "", "", 0, 0) })
+                }
+                
+                // Capture any late VFS events triggered by the refresh
+                val lateVfsEvents = sessionManager.getLiveVfsChangedFiles()
+
+                // Process using the snapshot via SessionManager (centralized logic)
+                // Pass late VFS events to help with affinity checks
+                val entries = sessionManager.getProcessedDiffs(diffs, snapshot, lateVfsEvents)
+                
+                if (entries.isNotEmpty()) {
+                    sessionManager.updateKnownState(entries.map { it.file })
                     
-                    val entries = sessionManager.processDiffs(diffs, snapshot)
-                    if (entries.isNotEmpty()) {
-                        // Resolve before content on background thread
-                        val resolvedEntries = entries.map { entry ->
-                            entry.copy(resolvedBefore = sessionManager.resolveBeforeContent(entry.file, entry.diff, snapshot))
-                        }.filter { entry ->
-                            // Filter out files where Before == After (already accepted or no change)
-                            // This handles "Ghost Diffs" where Server returns cumulative diffs from previous turns.
-                            val before = entry.beforeContent
-                            val after = entry.diff.after
-                            
-                            if (before != after) return@filter true
-                            
-                            // Rescue: If content appears identical (e.g. Empty->Empty delete) but VFS explicitly 
-                            // detected a change this turn, we should still show it. This rescues "Real Deletes"
-                            // where Before content was lost/empty.
-                            if (entry.file in snapshot.aiEditedFiles) return@filter true
-                            
-                            false
-                        }
-                        
-                        if (resolvedEntries.isNotEmpty()) {
-                            logger.info("[OpenCode] Turn #${snapshot.turnNumber} Showing ${resolvedEntries.size} diffs")
-                            invokeLater {
-                                if (!project.isDisposed) diffViewerService.showMultiFileDiff(resolvedEntries)
-                            }
-                        } else {
-                            logger.info("[OpenCode] Turn #${snapshot.turnNumber} All diffs filtered out (identical content)")
-                        }
-                    } else {
-                        logger.info("[OpenCode] Turn #${snapshot.turnNumber} No entries after processing")
+                    logger.info("[OpenCode] Turn #${snapshot.turnNumber} Showing ${entries.size} diffs")
+                    invokeLater {
+                        if (!project.isDisposed) diffViewerService.showMultiFileDiff(entries)
                     }
                 } else {
-                    logger.info("[OpenCode] Turn #${snapshot.turnNumber} No diffs received from any source")
+                    logger.info("[OpenCode] Turn #${snapshot.turnNumber} No diffs to show after processing.")
                 }
             } catch (e: Exception) {
                 logger.error("[OpenCode] Turn #${snapshot.turnNumber} Diff fetch error", e)
@@ -374,6 +364,9 @@ class OpenCodeService(private val project: Project) : Disposable {
             }
         }
     }
+    
+    // createSyntheticDiff removed - logic moved to SessionManager
+
 
     // ==================== Lifecycle & Connection ====================
 
@@ -473,7 +466,7 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     private fun connectToExistingServer(h: String, p: Int, a: ProcessAuthDetector.ServerAuth, ui: Boolean, web: Boolean) {
         hostname = h; port = p; username = a.username; password = a.password
-        if (ui) { if (web) createWebUI(h, p) else createTerminalUI(h, p, a.password, false) }
+        if (ui) { if (web) createWebUI(h, p) else createTerminalUIInternal(h, p, a.password, false) }
         initializeApiClient(h, p); startConnectionManager()
     }
 
@@ -482,20 +475,43 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun createWebTerminal(h: String, p: Int, pwd: String?) {
-        if (!ensureOpenCodeCliAvailable()) return
-        hostname = h; port = p; lastMode = ConnectionMode.WEB; createTerminalUI(h, p, pwd, true)
-        AppExecutorUtil.getAppExecutorService().submit { if (PortFinder.waitForPort(p, h, 30000, true)) { ApplicationManager.getApplication().invokeLater { createWebUI(h, p) }; initializeApiClient(h, p); startConnectionManager() } else terminateProcess() }
+        AppExecutorUtil.getAppExecutorService().submit {
+            if (!checkOpenCodeCliAvailable()) {
+                showCliNotFoundError()
+                return@submit
+            }
+            ApplicationManager.getApplication().invokeLater {
+                hostname = h; port = p; lastMode = ConnectionMode.WEB
+                createTerminalUIInternal(h, p, pwd, true)
+            }
+            if (PortFinder.waitForPort(p, h, 30000, true)) {
+                ApplicationManager.getApplication().invokeLater { createWebUI(h, p) }
+                initializeApiClient(h, p)
+                startConnectionManager()
+            } else {
+                terminateProcess()
+            }
+        }
     }
 
     private fun createLocalTerminal(h: String, p: Int, pwd: String?) {
-        if (!ensureOpenCodeCliAvailable()) return
-        hostname = h; port = p; lastMode = ConnectionMode.TERMINAL
-        AppExecutorUtil.getAppExecutorService().submit { if (PortFinder.waitForPort(p, h)) { initializeApiClient(h, p); startConnectionManager() } }
-        createTerminalUI(h, p, pwd)
+        AppExecutorUtil.getAppExecutorService().submit {
+            if (!checkOpenCodeCliAvailable()) {
+                showCliNotFoundError()
+                return@submit
+            }
+            ApplicationManager.getApplication().invokeLater {
+                hostname = h; port = p; lastMode = ConnectionMode.TERMINAL
+                createTerminalUIInternal(h, p, pwd)
+            }
+            if (PortFinder.waitForPort(p, h)) {
+                initializeApiClient(h, p)
+                startConnectionManager()
+            }
+        }
     }
 
-    private fun createTerminalUI(h: String, p: Int, pwd: String?, cont: Boolean = true) {
-        if (!ensureOpenCodeCliAvailable()) return
+    private fun createTerminalUIInternal(h: String, p: Int, pwd: String?, cont: Boolean = true) {
         val t = "$OPEN_CODE_TAB_PREFIX($p)"
         val w = TerminalView.getInstance(project).createLocalShellWidget(project.basePath, t)
         OpenCodeTerminalLinkFilter.install(project, w)
@@ -513,20 +529,25 @@ class OpenCodeService(private val project: Project) : Disposable {
         return if (isWindows()) "cmd /c \"set \"OPENCODE_SERVER_PASSWORD=${pwd.replace("\"", "\\\"")}\" && $base\"" else "OPENCODE_SERVER_PASSWORD='${pwd.replace("'", "'\\''")}' $base"
     }
 
-    private fun ensureOpenCodeCliAvailable(): Boolean {
+    /** Check CLI availability (safe for background thread) */
+    private fun checkOpenCodeCliAvailable(): Boolean {
         val cmds = if (isWindows()) listOf(listOf("cmd", "/c", "where", "opencode")) else listOf(listOf("which", "opencode"), listOf("sh", "-lc", "command -v opencode"))
-        val ok = cmds.any { try { CapturingProcessHandler(GeneralCommandLine(it)).runProcess(1500).exitCode == 0 } catch (_: Exception) { false } }
-        if (!ok) ApplicationManager.getApplication().invokeLater { Messages.showErrorDialog(project, "OpenCode CLI not found.", "Error") }
-        return ok
+        return cmds.any { try { CapturingProcessHandler(GeneralCommandLine(it)).runProcess(1500).exitCode == 0 } catch (_: Exception) { false } }
+    }
+    
+    /** Show CLI not found error (must call on any thread, will dispatch to EDT) */
+    private fun showCliNotFoundError() {
+        ApplicationManager.getApplication().invokeLater {
+            Messages.showErrorDialog(project, "OpenCode CLI not found.", "Error")
+        }
     }
 
     private fun isWindows() = System.getProperty("os.name", "").lowercase().contains("windows")
-    private fun isLinux() = System.getProperty("os.name", "").lowercase().contains("linux")
     private fun pinTerminalTab(f: VirtualFile) { try { FileEditorManagerEx.getInstanceEx(project).currentWindow?.setFilePinned(f, true) } catch (_: Exception) {} }
     private fun restartServer(m: ConnectionMode) { val h = hostname; val p = port ?: return; val pwd = password; disconnectAndReset(); hostname = h; port = p; password = pwd; lastMode = m; if (m == ConnectionMode.WEB) createWebTerminal(h, p, pwd) else createLocalTerminal(h, p, pwd) }
     private fun focusTerminalUI() { terminalVirtualFile?.let { FileEditorManager.getInstance(project).openFile(it, true) } ?: webVirtualFile?.let { FileEditorManager.getInstance(project).openFile(it, true) } }
     private fun restoreUiForMode() { when (lastMode) { ConnectionMode.TERMINAL -> ensureTerminalUi(); ConnectionMode.WEB -> ensureWebUi(); ConnectionMode.REMOTE -> showHeadlessStatusDialog(); else -> showConnectionDialog() } }
-    private fun ensureTerminalUi() { val f = terminalVirtualFile; if (f != null && OpenCodeTerminalFileEditorProvider.hasWidget(f)) focusTerminalUI() else createTerminalUI(hostname, port ?: return, password, false) }
+    private fun ensureTerminalUi() { val f = terminalVirtualFile; if (f != null && OpenCodeTerminalFileEditorProvider.hasWidget(f)) focusTerminalUI() else createTerminalUIInternal(hostname, port ?: return, password, false) }
     private fun ensureWebUi() { if (webVirtualFile != null) focusTerminalUI() else createWebUI(hostname, port ?: return) }
     private fun showHeadlessStatusDialog() { ApplicationManager.getApplication().invokeLater { if (Messages.showYesNoDialog(project, "Connected to $hostname:$port (Headless). Disconnect?", "OpenCode", "Disconnect", "Keep", Messages.getInformationIcon()) == Messages.YES) disconnectAndReset() } }
     private fun schedulePasteAttempt(t: String, l: Int, d: Long) { if (l <= 0 || project.isDisposed) return; AppExecutorUtil.getAppScheduledExecutorService().schedule({ ApplicationManager.getApplication().invokeLater { if (!project.isDisposed && !pasteToTerminal(t)) schedulePasteAttempt(t, l - 1, d) } }, d, TimeUnit.MILLISECONDS) }
