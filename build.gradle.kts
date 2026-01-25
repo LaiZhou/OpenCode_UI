@@ -62,6 +62,11 @@ tasks {
     withType<org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask> {
         systemProperty("ide.no.platform.update", "true")
     }
+
+    // Disable buildSearchableOptions as it is flaky and often fails
+    named("buildSearchableOptions") {
+        enabled = false
+    }
 }
 
 kotlin {

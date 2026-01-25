@@ -342,10 +342,11 @@ class OpenCodeService(private val project: Project) : Disposable {
                 
                 // Capture any late VFS events triggered by the refresh
                 val lateVfsEvents = sessionManager.getLiveVfsChangedFiles()
+                val lateAiCreatedFiles = sessionManager.getLiveAiCreatedFiles()
 
                 // Process using the snapshot via SessionManager (centralized logic)
                 // Pass late VFS events to help with affinity checks
-                val entries = sessionManager.getProcessedDiffs(diffs, snapshot, lateVfsEvents)
+                val entries = sessionManager.getProcessedDiffs(diffs, snapshot, lateVfsEvents, lateAiCreatedFiles)
                 
                 if (entries.isNotEmpty()) {
                     sessionManager.updateKnownState(entries.map { it.file })

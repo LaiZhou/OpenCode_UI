@@ -29,19 +29,11 @@ Layer 1: Mock IDE + Fake Server (OpenCodeLogicTest)
 
 | 场景 | 描述 | 验证逻辑 |
 | :--- | :--- | :--- |
-| **Scenario A: Normal Turn** | 标准的 Busy -> File Edited -> Idle 流程 | 验证 Diff 数据能正确显示。 |
-| **Scenario B: Pure Conversation** | 纯对话，无文件编辑 | 验证即使 API 返回干扰数据，前端也不显示 Diff。 |
-| **Scenario C: Turn Isolation** | Turn 1 结束，Turn 2 立即开始 | 验证 Turn 1 的 Diff 仍然保留，且 Turn 2 结束时不会显示 Turn 1 的内容。 |
-| **Scenario D: Race Condition** | Turn 1 结束触发 Fetch，Turn 2 立即开始 | 模拟网络延迟，验证 Snapshot 机制能正确处理这种竞态。 |
-| **Scenario E: Delete -> Reject -> Delete** | 恢复被删文件后再次被删 | 验证 Memory Snapshot (Known State) 能正确恢复 Before 内容。 |
-| **Scenario F: New File Safety** | AI 新建文件 | 验证 Disk Fallback 逻辑不会错误地读取新文件作为 Before (导致 Diff 消失)。 |
-| **Scenario G: User Edit Rescue Safety** | 用户修改文件 + VFS Change | 验证 Rescue 逻辑严格排除用户修改的文件。 |
-| **Scenario H: Ghost Diff Prevention** | Server 漏报 + 物理存在 | 验证如果文件在磁盘上仍然存在，即使 Server 漏报也不进行 Rescue（信任 Server）。 |
-| **Scenario I: Empty-Empty Prevention** | Server 返回空 Diff | 验证如果 Before 和 After 均为空，不显示 Diff 框。 |
-| **Scenario J: Pre-emptive Capture** | 模拟 LocalHistory 失效 | 验证 VFS 事件触发的 Pre-emptive Capture 能正确提供 Before 内容。 |
-| **Scenario K: Rescue New File** | Server 漏报 + 新建文件 | 验证当 Server 漏报但 VFS 确认新建时，通过 VFS 亲和力展示 Diff。 |
-| **Scenario L: Rescue Deletion** | Server 漏报 + 物理删除 | 验证当文件物理消失且 Server 漏报时，系统能自动补救并显示删除 Diff。 |
-| **Scenario M: Mod Rescue Skipped** | Server 漏报 + 普通修改 | 验证普通修改如果 Server 没报，绝不进行 Rescue（防止误报用户修改）。 |
+| **Scenario A: Normal Turn** | 标准的 Busy -> File Edited -> Idle 流程 | 验证基础修改 Diff 能正确显示。 |
+| **Scenario C: Turn Isolation** | Turn 1 结束，Turn 2 立即开始 | 验证 Turn 1 的 Diff 不会污染 Turn 2（Gap Event Filtering）。 |
+| **Scenario F: New File Safety** | AI 新建文件 | 验证新建文件的 Before 被正确解析为空，而不是从磁盘读取新内容导致 Diff 消失。 |
+| **Scenario G: User Edit Safety** | 用户修改文件 + VFS Change | 验证如果用户在 AI 工作期间修改了文件，该文件的 AI Diff 会被严格过滤（User Priority）。 |
+| **Scenario L: Rescue Deletion** | Server 漏报 + 物理删除 | 验证当文件物理消失且 Server 漏报时，系统能利用捕获的原始内容（Captured/KnownState）自动补救并显示 Diff。 |
 | **Scenario N: Server Authoritative** | 无 VFS 信号 + Server Diff | 验证只要有 SSE 声明，即使 VFS 没捕获到（如远程修改），Server Diff 也能显示。 |
 
 ### 2. 真实集成测试 (`RealProcessIntegrationTest`)

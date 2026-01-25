@@ -39,7 +39,6 @@ import java.util.concurrent.ConcurrentHashMap
  * 2. State is snapshotted at turn end to avoid race conditions
  * 3. LocalHistory for reliable before-state restoration
  */
-@Service(Service.Level.PROJECT)
 open class SessionManager(private val project: Project) : Disposable {
 
     private val logger = Logger.getInstance(SessionManager::class.java)
@@ -83,6 +82,9 @@ open class SessionManager(private val project: Project) : Disposable {
      * and Server state is stale (e.g. Server thinks file is deleted).
      */
     private val lastKnownFileStates = ConcurrentHashMap<String, String>()
+    
+    /** Cache of known states at the START of the current turn */
+    private var startOfTurnKnownState = HashMap<String, String>()
     
     // ==================== Pending Diffs ====================
     
@@ -204,6 +206,16 @@ open class SessionManager(private val project: Project) : Disposable {
         turnNumber++
         isBusy = true
         
+        // Gap State Synchronization:
+        // Before clearing vfsChangedFiles (which collected changes during the Gap),
+        // we must sync their current content to lastKnownFileStates.
+        // This ensures startOfTurnKnownState includes user edits made during the Gap.
+        if (vfsChangedFiles.isNotEmpty()) {
+            val gapChangedFiles = vfsChangedFiles.toList()
+            logger.info("[Turn #$turnNumber] Syncing ${gapChangedFiles.size} gap-changed files to known state")
+            updateKnownState(gapChangedFiles)
+        }
+        
         // STRICT TURN ISOLATION
         // We clear ALL change sets at the start of a turn. 
         // This prevents "Gap Events" (e.g. late VFS events from the previous turn's refresh)
@@ -213,6 +225,9 @@ open class SessionManager(private val project: Project) : Disposable {
         serverEditedFiles.clear()
         aiCreatedFiles.clear()
         capturedBeforeContent.clear()
+        
+        // Capture known state at start of turn (baseline for this turn)
+        startOfTurnKnownState = HashMap(lastKnownFileStates)
         
         baselineLabel = createSystemLabel("OpenCode Turn #$turnNumber Start")
         
@@ -266,7 +281,7 @@ open class SessionManager(private val project: Project) : Disposable {
             aiCreatedFiles = aiCreatedFiles,
             userEditedFiles = userEditedFiles.toSet(),
             baselineLabel = baselineLabel,
-            knownFileStates = HashMap(lastKnownFileStates),
+            knownFileStates = HashMap(startOfTurnKnownState), // Use Start-of-Turn state as 'Before' baseline
             capturedBeforeContent = HashMap(capturedBeforeContent) // Snapshot the captured content
         )
         
@@ -322,8 +337,14 @@ open class SessionManager(private val project: Project) : Disposable {
      * Main entry point for processing diffs.
      * Handles Rescue, Resolution, and Filtering in one place (Single Responsibility).
      * @param extraVfsEvents Additional VFS events (e.g. from post-turn refresh) to consider for affinity.
+     * @param extraAiCreatedFiles Additional AI created files (from post-turn refresh).
      */
-    fun getProcessedDiffs(serverDiffs: List<FileDiff>, snapshot: TurnSnapshot, extraVfsEvents: Set<String> = emptySet()): List<DiffEntry> {
+    fun getProcessedDiffs(
+        serverDiffs: List<FileDiff>, 
+        snapshot: TurnSnapshot, 
+        extraVfsEvents: Set<String> = emptySet(),
+        extraAiCreatedFiles: Set<String> = emptySet()
+    ): List<DiffEntry> {
         logger.info("[Turn #${snapshot.turnNumber}] Processing diffs (Server: ${serverDiffs.size})")
         logger.info("[Turn #${snapshot.turnNumber}] Snapshot state:")
         logger.info("[Turn #${snapshot.turnNumber}]   vfsChangedFiles: ${snapshot.vfsChangedFiles}")
@@ -332,6 +353,7 @@ open class SessionManager(private val project: Project) : Disposable {
         logger.info("[Turn #${snapshot.turnNumber}]   userEditedFiles: ${snapshot.userEditedFiles}")
         logger.info("[Turn #${snapshot.turnNumber}]   capturedBeforeContent keys: ${snapshot.capturedBeforeContent.keys}")
         logger.info("[Turn #${snapshot.turnNumber}]   extraVfsEvents: $extraVfsEvents")
+        logger.info("[Turn #${snapshot.turnNumber}]   extraAiCreatedFiles: $extraAiCreatedFiles")
 
         // 1. VFS Rescue: Find files changed/deleted locally but missed by Server
         // Only rescue files that have STRONG AI affinity (serverEditedFiles) or physical deletion
@@ -362,7 +384,7 @@ open class SessionManager(private val project: Project) : Disposable {
 
             // Determine if this is truly an AI operation by checking various signals
             val isServerClaimed = vfsFile in snapshot.serverEditedFiles
-            val isVfsCreated = vfsFile in snapshot.aiCreatedFiles
+            val isVfsCreated = vfsFile in snapshot.aiCreatedFiles || vfsFile in extraAiCreatedFiles
             // Check if we can resolve the before content (from Capture, LocalHistory, or KnownState)
             val hasCapturedBefore = getSnapshotBeforeContent(vfsFile, snapshot) != null
 
@@ -392,6 +414,13 @@ open class SessionManager(private val project: Project) : Disposable {
                 exists && isVfsCreated && isServerClaimed -> {
                     logger.info("[Rescue] $vfsFile -> RESCUE: Created (VFS) + Server claimed")
                     true
+                }
+                // Case 4: Modification (Exists + Server Claimed + NOT Created)
+                // This covers the case where Server edited the file, we saw the VFS change, 
+                // but Server API failed to return a diff.
+                exists && !isVfsCreated && isServerClaimed -> {
+                     logger.info("[Rescue] $vfsFile -> RESCUE: Modified + Server claimed")
+                     true
                 }
                 // Default: Not enough evidence, skip
                 else -> {
@@ -603,6 +632,10 @@ open class SessionManager(private val project: Project) : Disposable {
         return vfsChangedFiles.toSet()
     }
     
+    fun getLiveAiCreatedFiles(): Set<String> {
+        return aiCreatedFiles.toSet()
+    }
+    
     fun getKnownFilePaths(): Set<String> {
         return lastKnownFileStates.keys.toSet()
     }
@@ -634,26 +667,27 @@ open class SessionManager(private val project: Project) : Disposable {
         val absPath = PathUtil.resolveProjectPath(project, relativePath)
         val serverBefore = diff.before
 
-        // Explicit New File Safety: If server says before is empty and intent is Create (after not empty),
-        // we MUST trust the server. This prevents reading the AI's newly written content from disk
-        // as the "before" state, which would result in an empty (Before==After) diff.
-        if (serverBefore.isEmpty() && diff.after.isNotEmpty()) {
-            logger.info("[Turn #${snapshot.turnNumber}] Server declared NEW file: $relativePath. Forcing before to empty.")
-            return ""
-        }
-
-        // VFS Creation Safety: If we detected a physical creation event, also force before to empty.
+        // 1. VFS Creation Safety: If we detected a physical creation event, force before to empty.
+        // This takes precedence because we KNOW it's a new file from our perspective.
         if (serverBefore.isEmpty() && relativePath in snapshot.aiCreatedFiles) {
             logger.info("[Turn #${snapshot.turnNumber}] VFS detected NEW file: $relativePath. Forcing before to empty.")
             return ""
         }
 
-        // Try to get content from snapshot sources
+        // 2. Try to get content from snapshot sources (Capture, LocalHistory, KnownState)
         getSnapshotBeforeContent(relativePath, snapshot)?.let { 
             if (it.isNotEmpty() || serverBefore.isEmpty()) {
                  logger.info("[Turn #${snapshot.turnNumber}] Resolved before content for $relativePath")
                  return it
             }
+        }
+        
+        // 3. Explicit New File Safety: If server says before is empty and intent is Create (after not empty),
+        // we MUST trust the server IF we failed to find local history. 
+        // This prevents reading the AI's newly written content from disk as the "before" state.
+        if (serverBefore.isEmpty() && diff.after.isNotEmpty()) {
+            logger.info("[Turn #${snapshot.turnNumber}] Server declared NEW file: $relativePath. Forcing before to empty.")
+            return ""
         }
         
         // 4. Fallback: If Server Before is empty but file exists on disk -> Read Disk
@@ -813,6 +847,7 @@ open class SessionManager(private val project: Project) : Disposable {
         userEditedFiles.clear()
         pendingDiffs.clear()
         lastKnownFileStates.clear()
+        startOfTurnKnownState.clear()
         capturedBeforeContent.clear()
     }
 

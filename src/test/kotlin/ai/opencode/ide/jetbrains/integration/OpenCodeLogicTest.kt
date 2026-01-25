@@ -252,6 +252,58 @@ class OpenCodeLogicTest {
             r.assertDiffShown("server_only.kt")
             println("✓ Passed")
 
+            // --------------------------------------------------
+            // TEST: Scenario O: Create then Modify (Rescue)
+            // --------------------------------------------------
+            println("\n--------------------------------------------------")
+            println("TEST: Scenario O: Create then Modify (Rescue)")
+            println("--------------------------------------------------")
+            
+            r.resetState()
+            
+            // Turn 1: Create 1.md
+            println("  Step 1: Create 1.md")
+            s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"busy"}}}""")
+            Thread.sleep(100)
+            
+            val file1 = java.io.File(tempDir, "1.md")
+            file1.writeText("created content")
+            r.sessionManager.simulateFileCreation("1.md")
+            s.broadcast("""{"type":"file.edited","properties":{"file":"1.md"}}""")
+            s.broadcast("""{"type":"message.updated","properties":{"info":{"id":"msg-17-a","sessionID":"s1","role":"assistant"}}}""")
+            
+            // Server might return diff or not. Let's say it returns nothing (Rescue Creation)
+            s.setDiffResponse("msg-17-a", "[]")
+            
+            s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"idle"}}}""")
+            
+            r.waitForDiffs(1)
+            r.assertDiffShown("1.md")
+            
+            // Turn 2: Modify 1.md
+            println("  Step 2: Modify 1.md")
+            s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"busy"}}}""")
+            Thread.sleep(100)
+            
+            file1.writeText("modified content")
+            // Crucially: NOT calling simulateFileCreation here, only VfsChange
+            r.sessionManager.simulateVfsChange("1.md")
+            s.broadcast("""{"type":"file.edited","properties":{"file":"1.md"}}""")
+            s.broadcast("""{"type":"message.updated","properties":{"info":{"id":"msg-17-b","sessionID":"s1","role":"assistant"}}}""")
+            
+            // Server returns empty diffs again (Simulate API failure)
+            s.setDiffResponse("msg-17-b", "[]")
+            
+            s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"idle"}}}""")
+            
+            // Verify diff is shown (Rescue Modification)
+            r.waitForDiffs(1)
+            r.assertDiffShown("1.md")
+            
+            // Cleanup
+            file1.delete()
+            println("✓ Passed")
+
             println("\nAll tests passed!")
             
         } catch (e: Throwable) {
