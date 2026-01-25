@@ -69,13 +69,15 @@ sequenceDiagram
 ### 1. Diff 收集与展示
 
 - **触发器**: SSE `session.status` (`busy` → `idle`) 和 `session.idle`。
-- **策略: 服务器权威 + 客户端智能过滤**: 
-  - **Server Authoritative**: 信任服务器返回的 Diff 数据作为事实来源。
-  - **Gap Event Capture**: VFS 事件记录在 `onTurnEnd` 时轮转。这确保了在 Turn 间隔（Gap）期间发生的事件被归因到下一个 Turn，防止 "Late Baseline" 竞态条件。
-  - **VFS Rescue**: 在过滤 `Before == After` (Ghost Diff) 时，如果 VFS 在本轮明确捕获到了变更（`aiEditedFiles`），强制显示。这挽救了因快照滞后导致的 "Empty->Empty" 删除操作 Diff 丢失问题。
+- **策略: 服务器权威 + 客户端智能矫正**: 
+  - **Server Authoritative**: 默认信任服务器返回的 Diff 数据。
+  - **Pre-Filter (Stale Protection)**: 如果 Server 返回的 Diff 显示无变化 (`Before == After`) 但 VFS 检测到了物理修改，视为 Server 数据滞后，强制丢弃该 Diff 并触发 Rescue。
+  - **Gap State Sync**: 在 `onTurnStart` 时，将 Gap 期（空闲期）的用户修改同步到内存快照，防止 AI 覆盖用户在回合间隙所做的修改。
+  - **VFS Rescue**: 对 Server 漏报或滞后的文件（删除、新建、或被 Pre-Filter 丢弃的修改），利用本地快照合成 Diff。
 
 - **Busy 开始**:
-  - **Memory Snapshot**: 从上一轮继承 `lastKnownFileStates`（Reject 恢复的内容）。
+  - **Gap Sync**: 将 Gap 期的 `vfsChangedFiles` 同步到 `lastKnownFileStates`。
+  - **Memory Snapshot**: 锁定当前已知状态为 `startOfTurnKnownState`。
   - 创建 LocalHistory 基准标签 `OpenCode Modified Before`。
 
 - **Idle 阶段**:
@@ -137,12 +139,15 @@ SessionManager 严格区分以下信号：
 *   **Server 声明 (`serverEditedFiles`)**: AI 明确声明其修改了的文件（通过 SSE `file.edited` 事件）。
 *   **用户编辑 (`userEditedFiles`)**: IDE 检测到的用户手动输入。
 
-**Conservative Rescue 策略** (2026-01-24 修复):
+**Pre-Filter (智能预过滤)**:
+在处理 Server Diff 之前，检查 `if (diff.before == diff.after && isVfsTouched)`。如果成立，说明 Server 返回了过时数据（Stale Diff），直接丢弃，强制进入 Rescue 流程读取磁盘最新状态。
+
+**Conservative Rescue 策略** (2026-01-25 修复):
 
 为了防止误报（如用户操作被误归因为 AI），Rescue 需要满足严格的 AI 亲和力条件：
 
 **共同前提**：
-*   Server API 返回的 Diff 列表中不包含该文件
+*   Server API 返回的 Diff 列表中不包含该文件（或已被 Pre-Filter 丢弃）
 *   文件不在 `userEditedFiles` 列表中（排除用户操作）
 
 **删除文件 Rescue** (`!exists`):
@@ -151,15 +156,14 @@ SessionManager 严格区分以下信号：
 
 **新建文件 Rescue** (`exists && isVfsCreated`):
 *   **必须同时满足** VFS 检测到创建 (`aiCreatedFiles`) + Server SSE 声明 (`serverEditedFiles`)
-*   仅 VFS 创建事件不足以 Rescue，因为无法区分 AI 创建和用户创建
 
-**修改文件**：
-*   不进行 Rescue。如果 Server API 没报，即便 VFS 有变更，也视为外部干扰或用户操作。
+**修改文件 Rescue** (`exists && !isVfsCreated`):
+*   **必须满足** Server SSE 声明 (`serverEditedFiles`)。这用于修复 Server Diff 滞后导致修改丢失的问题。
 
 此策略有效解决了：
 *   Ghost Diffs（无实质变更的 Diff）
+*   连续修改文件时 Diff 丢失 (通过 Pre-Filter + Rescue)
 *   用户手动编辑被 AI 抢功
-*   用户新建文件被误归因为 AI
 
 #### 3. 过滤策略 (Filtering Strategy)
 

@@ -35,6 +35,7 @@ Layer 1: Mock IDE + Fake Server (OpenCodeLogicTest)
 | **Scenario G: User Edit Safety** | 用户修改文件 + VFS Change | 验证如果用户在 AI 工作期间修改了文件，该文件的 AI Diff 会被严格过滤（User Priority）。 |
 | **Scenario L: Rescue Deletion** | Server 漏报 + 物理删除 | 验证当文件物理消失且 Server 漏报时，系统能利用捕获的原始内容（Captured/KnownState）自动补救并显示 Diff。 |
 | **Scenario N: Server Authoritative** | 无 VFS 信号 + Server Diff | 验证只要有 SSE 声明，即使 VFS 没捕获到（如远程修改），Server Diff 也能显示。 |
+| **Scenario O: Create then Modify** | 连续回合创建后修改 | 验证 Pre-Filter 和 Rescue 机制能正确处理服务器返回滞后数据的情况（防止因 Before==After 而过滤真实修改）。 |
 
 ### 2. 真实集成测试 (`RealProcessIntegrationTest`)
 

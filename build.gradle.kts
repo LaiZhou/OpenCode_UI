@@ -43,10 +43,11 @@ intellijPlatform {
         changeNotes = """
             <h2>1.0.6</h2>
             <ul>
-              <li>Fix: Strict turn isolation to prevent "ghost diffs" from previous turns appearing in new messages.</li>
-              <li>Fix: Robust handling of file deletions (Improved Rescue logic with LocalHistory fallback).</li>
-              <li>Fix: Ensured diffs for basic modifications appear even if server signals are delayed.</li>
-              <li>Fix: Resolved missing diffs for new files by trusting Server API signals.</li>
+              <li>Fix: Resolved issue where consecutive edits to the same file might not show a diff.</li>
+              <li>Fix: Enhanced stability for file creation and deletion detection.</li>
+              <li>Improvement: Better handling of user edits during idle periods to prevent data loss.</li>
+              <li>Improvement: Eliminated "Ghost Diffs" (no actual content changes).</li>
+              <li>Refactor: Strict turn isolation to prevent state pollution between turns.</li>
             </ul>
         """.trimIndent()
     }

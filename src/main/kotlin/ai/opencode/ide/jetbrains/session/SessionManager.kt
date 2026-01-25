@@ -355,10 +355,35 @@ open class SessionManager(private val project: Project) : Disposable {
         logger.info("[Turn #${snapshot.turnNumber}]   extraVfsEvents: $extraVfsEvents")
         logger.info("[Turn #${snapshot.turnNumber}]   extraAiCreatedFiles: $extraAiCreatedFiles")
 
+        // 0. Pre-Filter: Detect and discard "Stale No-Op" Server Diffs
+        // If Server returns a diff that results in NO CHANGE (Before == After),
+        // but VFS detected a physical change, it means the Server Diff is stale/wrong.
+        // We discard it so that the Rescue logic (Step 1) can generate a correct Synthetic Diff from disk.
+        val validServerDiffs = serverDiffs.filter { diff ->
+            val file = diff.file
+            val isVfsTouched = file in snapshot.vfsChangedFiles || 
+                              file in snapshot.aiCreatedFiles || 
+                              file in snapshot.capturedBeforeContent.keys ||
+                              file in extraVfsEvents ||
+                              file in extraAiCreatedFiles
+
+            if (!isVfsTouched) return@filter true // Keep purely server-side diffs (no VFS conflict)
+
+            // Resolve before content using the diff as hint
+            val before = resolveBeforeContent(file, diff, snapshot)
+            val after = diff.after
+            
+            if (before == after) {
+                logger.warn("[PreFilter] $file -> DISCARD: Server diff implies no change (len=${before.length}), but VFS changed. Triggering Rescue.")
+                return@filter false
+            }
+            true
+        }
+
         // 1. VFS Rescue: Find files changed/deleted locally but missed by Server
         // Only rescue files that have STRONG AI affinity (serverEditedFiles) or physical deletion
         val rescueCandidates = snapshot.vfsChangedFiles + snapshot.capturedBeforeContent.keys + extraVfsEvents
-        val serverFileNames = serverDiffs.map { it.file }.toSet()
+        val serverFileNames = validServerDiffs.map { it.file }.toSet()
 
         val vfsMissing = rescueCandidates.filter { vfsFile ->
             // Skip if Server already returned this file
@@ -433,7 +458,7 @@ open class SessionManager(private val project: Project) : Disposable {
 
         logger.info("[Turn #${snapshot.turnNumber}] Rescue candidates: $vfsMissing")
 
-        val allDiffs = serverDiffs + vfsMissing.mapNotNull { createSyntheticDiff(it, snapshot) }
+        val allDiffs = validServerDiffs + vfsMissing.mapNotNull { createSyntheticDiff(it, snapshot) }
         
         if (allDiffs.isEmpty()) {
             logger.info("[Turn #${snapshot.turnNumber}] No diffs after rescue.")
