@@ -105,17 +105,33 @@ object ProcessAuthDetector {
                 return ServerAuth()
             }
             
-            // Verify it's OpenCode process using tasklist
-            // tasklist /FI "PID eq $pid" /FO CSV /NH
-            val tasklistOutput = runCommand(listOf("tasklist", "/FI", "PID eq $pid", "/FO", "CSV", "/NH")) ?: return ServerAuth()
+            // Verify it's OpenCode process.
+            // Strategy:
+            // 1. Check if Image Name contains "opencode" (Fast, catches 'opencode.exe')
+            // 2. Check if Command Line contains "opencode" (Slower/WMI, catches 'node opencode')
             
-            // "opencode.exe","1234","Console","1","10,000 K"
-            val isOpenCodeProcess = tasklistOutput.stdoutLines.any { 
-                it.contains("opencode", ignoreCase = true) 
+            // Check 1: Image Name via tasklist
+            var isTargetProcess = false
+            try {
+                val tasklistOutput = runCommand(listOf("tasklist", "/FI", "PID eq $pid", "/FO", "CSV", "/NH"))
+                if (tasklistOutput != null) {
+                    isTargetProcess = tasklistOutput.stdoutLines.any { it.contains("opencode", ignoreCase = true) }
+                }
+            } catch (e: Exception) {
+                logger.debug("Tasklist check failed: ${e.message}")
             }
-            
-            if (!isOpenCodeProcess) {
-                logger.debug("Process $pid is not OpenCode (Windows)")
+
+            // Check 2: Command Line via WMI (if Check 1 failed)
+            if (!isTargetProcess) {
+                val commandLine = getWindowsProcessCommandLine(pid)
+                if (commandLine != null && commandLine.contains("opencode", ignoreCase = true)) {
+                    isTargetProcess = true
+                } else {
+                     logger.debug("Process $pid is not OpenCode (Windows). CmdLine: $commandLine")
+                }
+            }
+
+            if (!isTargetProcess) {
                 return ServerAuth()
             }
             
@@ -128,6 +144,18 @@ object ProcessAuthDetector {
         // Fallback: return no auth
         logger.debug("Windows auth detection failed, falling back to no-auth connection")
         return ServerAuth()
+    }
+
+    private fun getWindowsProcessCommandLine(pid: String): String? {
+        try {
+            // Use PowerShell/WMI to get the command line
+            val psCommand = "Get-WmiObject Win32_Process -Filter \"Handle='$pid'\" | Select-Object -ExpandProperty CommandLine"
+            val output = runCommand(listOf("powershell", "-Command", psCommand))
+            return output?.stdout?.trim()
+        } catch (e: Exception) {
+            logger.debug("Failed to get command line for PID $pid: ${e.message}")
+            return null
+        }
     }
     
     private fun detectAuthForPortWindowsPowerShell(pid: String): ServerAuth {

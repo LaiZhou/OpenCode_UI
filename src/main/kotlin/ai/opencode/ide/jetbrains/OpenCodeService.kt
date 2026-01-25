@@ -532,8 +532,18 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     /** Check CLI availability (safe for background thread) */
     private fun checkOpenCodeCliAvailable(): Boolean {
-        val cmds = if (isWindows()) listOf(listOf("cmd", "/c", "where", "opencode")) else listOf(listOf("which", "opencode"), listOf("sh", "-lc", "command -v opencode"))
-        return cmds.any { try { CapturingProcessHandler(GeneralCommandLine(it)).runProcess(1500).exitCode == 0 } catch (_: Exception) { false } }
+        val cmds = if (isWindows()) {
+            listOf(
+                listOf("cmd", "/c", "where", "opencode"),
+                listOf("powershell", "-Command", "Get-Command opencode")
+            )
+        } else {
+            listOf(
+                listOf("which", "opencode"),
+                listOf("sh", "-lc", "command -v opencode")
+            )
+        }
+        return cmds.any { try { CapturingProcessHandler(GeneralCommandLine(it)).runProcess(3000).exitCode == 0 } catch (_: Exception) { false } }
     }
     
     /** Show CLI not found error (must call on any thread, will dispatch to EDT) */
