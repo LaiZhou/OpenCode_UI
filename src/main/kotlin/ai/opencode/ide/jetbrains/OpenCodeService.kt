@@ -23,6 +23,7 @@ import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.ui.SystemNotifications
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -439,11 +440,18 @@ class OpenCodeService(private val project: Project) : Disposable {
         val time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
         ApplicationManager.getApplication().invokeLater {
             if (!project.isDisposed) {
+                // IDE Balloon notification
                 NotificationGroupManager.getInstance()
                     .getNotificationGroup("OpenCode")
                     .createNotification(title, "[$time] $content", type)
                     .setImportant(true)
                     .notify(project)
+                // System notification (OS level)
+                try {
+                    SystemNotifications.getInstance().notify("OpenCode", title, content)
+                } catch (e: Throwable) {
+                    logger.debug("[OpenCode] System notification failed: ${e.message}")
+                }
             }
         }
     }
