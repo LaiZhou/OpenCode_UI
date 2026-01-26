@@ -36,30 +36,6 @@ class OpenCodeTerminalFileEditor(
 
     init {
         logger.debug("Created OpenCode terminal editor for: ${virtualFile.name} (widget=${if(terminalWidget!=null) "present" else "null"})")
-        
-        terminalWidget?.component?.let { rootComp ->
-            // Recursively attach listeners to ALL components in the hierarchy
-            attachDebugListenersRecursively(rootComp)
-        }
-    }
-
-    private fun attachDebugListenersRecursively(comp: java.awt.Component) {
-        if (comp is JComponent) {
-            comp.addMouseWheelListener { e ->
-                logger.info("[Debug] MouseWheel on ${comp.javaClass.name} (hash=${comp.hashCode()}): type=${e.scrollType}, rot=${e.wheelRotation}")
-            }
-            comp.addMouseListener(object : java.awt.event.MouseAdapter() {
-                override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                    logger.info("[Debug] Clicked on ${comp.javaClass.name} (hash=${comp.hashCode()}) at ${e.point}")
-                }
-            })
-        }
-        
-        if (comp is java.awt.Container) {
-            for (child in comp.components) {
-                attachDebugListenersRecursively(child)
-            }
-        }
     }
 
     override fun getComponent(): JComponent = terminalWidget?.component ?: placeholderComponent
