@@ -156,8 +156,16 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     fun pasteToTerminal(text: String): Boolean {
         if (text.isBlank()) return false
-        apiClient?.let { client -> AppExecutorUtil.getAppExecutorService().submit { val ok = try { client.tuiAppendPrompt(text) } catch (_: Exception) { false }; if (!ok) ApplicationManager.getApplication().invokeLater { terminalEditor?.terminalWidget?.ttyConnector?.write(text.toByteArray()) } }; return true }
-        terminalEditor?.terminalWidget?.ttyConnector?.let { it.write(text.toByteArray()); return true }
+        apiClient?.let { client -> 
+            AppExecutorUtil.getAppExecutorService().submit { 
+                try { 
+                    if (!client.tuiAppendPrompt(text)) logger.warn("[Paste] API failed to append prompt")
+                } catch (e: Exception) { 
+                    logger.warn("[Paste] API error: ${e.message}") 
+                } 
+            }
+            return true 
+        }
         return false
     }
 
