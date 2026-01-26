@@ -21,6 +21,8 @@ import com.google.gson.JsonElement
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.execution.process.OSProcessHandler
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -167,7 +169,7 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     // ==================== Event Handling & Barrier ====================
 
-    internal fun handleEvent(event: OpenCodeEvent) {
+    private fun handleEvent(event: OpenCodeEvent) {
         if (event !is MessagePartUpdatedEvent && event !is UnknownEvent) logger.info("[OpenCode] SSE: ${event.type}")
         when (event) {
             is SessionStatusEvent -> {
@@ -182,6 +184,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                     if (snapshot != null) {
                         turnSnapshots[sId] = snapshot
                         logger.info("[OpenCode] Turn #${snapshot.turnNumber} snapshot captured")
+                        sendNotification("OpenCode Task Completed", "Session is now idle. Checking for changes...")
                     }
                     turnIdleWaiting[sId] = true
                     attemptBarrierTrigger(sId)
@@ -193,6 +196,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                 if (snapshot != null) {
                     turnSnapshots[sId] = snapshot
                     logger.info("[OpenCode] Turn #${snapshot.turnNumber} snapshot captured (via idle event)")
+                    sendNotification("OpenCode Task Completed", "Session is now idle. Checking for changes...")
                 }
                 turnIdleWaiting[sId] = true
                 attemptBarrierTrigger(sId)
@@ -423,6 +427,14 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun updateConnectionState(connected: Boolean) { if (isConnected.getAndSet(connected) != connected) connectionListeners.forEach { it(connected) } }
+    private fun sendNotification(title: String, content: String, type: NotificationType = NotificationType.INFORMATION) {
+        val time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup("OpenCode")
+            .createNotification(title, "[$time] $content", type)
+            .notify(project)
+    }
+
     override fun dispose() { disconnectAndReset(); OpenCodeTerminalFileEditorProvider.clearAll() }
 
     private fun disconnectAndReset() {
