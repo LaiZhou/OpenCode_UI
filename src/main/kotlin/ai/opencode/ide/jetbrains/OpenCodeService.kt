@@ -437,10 +437,15 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun updateConnectionState(connected: Boolean) { if (isConnected.getAndSet(connected) != connected) connectionListeners.forEach { it(connected) } }
     private fun sendNotification(title: String, content: String, type: NotificationType = NotificationType.INFORMATION) {
         val time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-        NotificationGroupManager.getInstance()
-            .getNotificationGroup("OpenCode")
-            .createNotification(title, "[$time] $content", type)
-            .notify(project)
+        ApplicationManager.getApplication().invokeLater {
+            if (!project.isDisposed) {
+                NotificationGroupManager.getInstance()
+                    .getNotificationGroup("OpenCode")
+                    .createNotification(title, "[$time] $content", type)
+                    .setImportant(true)
+                    .notify(project)
+            }
+        }
     }
 
     override fun dispose() { disconnectAndReset(); OpenCodeTerminalFileEditorProvider.clearAll() }
