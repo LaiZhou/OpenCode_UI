@@ -428,7 +428,7 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun showRemoteReconnectDialog() {
-        ApplicationManager.getApplication().invokeLater { if (isConnected.get()) return@invokeLater; if (Messages.showYesNoCancelDialog(project, "Connection lost. Reconnect?", "OpenCode", "Reconnect", "New", "Cancel", Messages.getWarningIcon()) == Messages.NO) { disconnectAndReset(); showConnectionDialog() } else if (ApplicationManager.getApplication().isExitInProgress) disconnectAndReset() }
+        ApplicationManager.getApplication().invokeLater { if (isConnected.get()) return@invokeLater; if (Messages.showYesNoCancelDialog(project, "Connection lost. Reconnect?", "OpenCode", "Reconnect", "New", "Cancel", Messages.getWarningIcon()) == Messages.NO) { disconnectAndReset(); showConnectionDialog() } }
     }
 
     private fun connectToSse() {
