@@ -21,6 +21,7 @@ import com.google.gson.JsonElement
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.execution.process.OSProcessHandler
+import com.intellij.notification.Notification
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.ui.SystemNotifications
@@ -78,6 +79,7 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     private val connectionListeners = CopyOnWriteArrayList<(Boolean) -> Unit>()
     private var connectionManagerTask: ScheduledFuture<*>? = null
+    @Volatile private var lastIdleNotification: Notification? = null
     
     // Turn state: keyed by sessionId
     private val turnMessageIds = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -193,7 +195,11 @@ class OpenCodeService(private val project: Project) : Disposable {
                     if (snapshot != null) {
                         turnSnapshots[sId] = snapshot
                         logger.info("[OpenCode] Turn #${snapshot.turnNumber} snapshot captured")
-                        sendNotification("OpenCode Task Completed", "Session is now idle. Checking for changes...")
+                        sendNotification(
+                            "OpenCode Task Completed",
+                            "Session is now idle. Checking for changes...",
+                            replacePrevious = true
+                        )
                     }
                     turnIdleWaiting[sId] = true
                     attemptBarrierTrigger(sId)
@@ -205,7 +211,11 @@ class OpenCodeService(private val project: Project) : Disposable {
                 if (snapshot != null) {
                     turnSnapshots[sId] = snapshot
                     logger.info("[OpenCode] Turn #${snapshot.turnNumber} snapshot captured (via idle event)")
-                    sendNotification("OpenCode Task Completed", "Session is now idle. Checking for changes...")
+                    sendNotification(
+                        "OpenCode Task Completed",
+                        "Session is now idle. Checking for changes...",
+                        replacePrevious = true
+                    )
                 }
                 turnIdleWaiting[sId] = true
                 attemptBarrierTrigger(sId)
@@ -436,22 +446,27 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun updateConnectionState(connected: Boolean) { if (isConnected.getAndSet(connected) != connected) connectionListeners.forEach { it(connected) } }
-    private fun sendNotification(title: String, content: String, type: NotificationType = NotificationType.INFORMATION) {
+    private fun sendNotification(
+        title: String,
+        content: String,
+        type: NotificationType = NotificationType.INFORMATION,
+        replacePrevious: Boolean = false
+    ) {
         val time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
-        ApplicationManager.getApplication().invokeLater {
-            if (!project.isDisposed) {
-                // IDE Balloon notification
-                NotificationGroupManager.getInstance()
-                    .getNotificationGroup("OpenCode")
-                    .createNotification(title, "[$time] $content", type)
-                    .setImportant(true)
-                    .notify(project)
-                // System notification (OS level)
-                try {
-                    SystemNotifications.getInstance().notify("OpenCode", title, content)
-                } catch (e: Throwable) {
-                    logger.debug("[OpenCode] System notification failed: ${e.message}")
-                }
+        val message = "[$time] $content"
+        invokeLater {
+            if (project.isDisposed) return@invokeLater
+            if (replacePrevious) lastIdleNotification?.expire()
+            val notification = NotificationGroupManager.getInstance()
+                .getNotificationGroup("OpenCode")
+                .createNotification(title, message, type)
+                .setImportant(true)
+            if (replacePrevious) lastIdleNotification = notification
+            notification.notify(project)
+            try {
+                SystemNotifications.getInstance().notify("OpenCode", title, message)
+            } catch (e: Throwable) {
+                logger.debug("[OpenCode] System notification failed: ${e.message}")
             }
         }
     }

@@ -66,8 +66,8 @@
     <fileEditorProvider implementation="ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditorProvider"/>
     <fileEditorProvider implementation="ai.opencode.ide.jetbrains.web.OpenCodeWebFileEditorProvider"/>
 
-    <!-- Notifications (STICKY_BALLOON enables macOS system notifications when IDE is not focused) -->
-    <notificationGroup id="OpenCode" displayType="STICKY_BALLOON"/>
+    <!-- Notifications -->
+    <notificationGroup id="OpenCode" displayType="BALLOON"/>
 
     <toolWindow id="OpenCode"
                 factoryClass="ai.opencode.ide.jetbrains.OpenCodeToolWindowFactory"

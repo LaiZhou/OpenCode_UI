@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.6"
+version = "1.0.7"
 
 repositories {
     mavenCentral()
@@ -41,13 +41,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.6</h2>
+            <h2>1.0.7</h2>
             <ul>
-              <li>Fix: Resolved issue where consecutive edits to the same file might not show a diff.</li>
-              <li>Fix: Enhanced stability for file creation and deletion detection.</li>
-              <li>Improvement: Better handling of user edits during idle periods to prevent data loss.</li>
-              <li>Improvement: Eliminated "Ghost Diffs" (no actual content changes).</li>
-              <li>Refactor: Strict turn isolation to prevent state pollution between turns.</li>
+              <li>Prevent task-complete notifications from stacking by replacing the previous idle notification.</li>
+              <li>Restore in-IDE balloon notifications for the OpenCode group.</li>
+              <li>Improve OS-level notifications for task completion.</li>
             </ul>
         """.trimIndent()
     }
