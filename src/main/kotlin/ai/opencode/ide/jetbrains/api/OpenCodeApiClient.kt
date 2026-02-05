@@ -28,8 +28,8 @@ open class OpenCodeApiClient(
     protected val client = OkHttpClient.Builder()
         .proxy(java.net.Proxy.NO_PROXY)
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .apply {
             if (username != null && password != null) {
                 addInterceptor { chain ->

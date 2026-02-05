@@ -575,13 +575,15 @@ class OpenCodeService(private val project: Project) : Disposable {
                 hostname = h; port = p; lastMode = ConnectionMode.WEB
                 createTerminalUIInternal(h, p, pwd, true)
             }
-            if (PortFinder.waitForPort(p, h, 30000, true)) {
-                ApplicationManager.getApplication().invokeLater { createWebUI(h, p) }
-                initializeApiClient(h, p)
-                startConnectionManager()
-            } else {
-                terminateProcess()
+            // Increase timeout to 30s for all platforms
+            if (!PortFinder.waitForPort(p, h, timeoutMs = 30000, requireHealth = true)) {
+                logger.warn("[OpenCode] Initial waitForPort (Web) timed out for $h:$p, starting ConnectionManager anyway")
             }
+            
+            // Even if it timed out, we might still want the UI and the API client to try reconnecting
+            ApplicationManager.getApplication().invokeLater { createWebUI(h, p) }
+            initializeApiClient(h, p)
+            startConnectionManager()
         }
     }
 
@@ -601,10 +603,13 @@ class OpenCodeService(private val project: Project) : Disposable {
                 hostname = h; port = p; lastMode = ConnectionMode.TERMINAL
                 createTerminalUIInternal(h, p, pwd)
             }
-            if (PortFinder.waitForPort(p, h)) {
-                initializeApiClient(h, p)
-                startConnectionManager()
+            // Increase timeout to 30s for all platforms (Windows startup can be slow)
+            if (!PortFinder.waitForPort(p, h, timeoutMs = 30000)) {
+                logger.warn("[OpenCode] Initial waitForPort timed out for $h:$p, starting ConnectionManager anyway")
             }
+            
+            initializeApiClient(h, p)
+            startConnectionManager()
         }
     }
 
@@ -639,7 +644,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                 listOf("sh", "-lc", "command -v opencode")
             )
         }
-        return cmds.any { try { CapturingProcessHandler(GeneralCommandLine(it)).runProcess(3000).exitCode == 0 } catch (_: Exception) { false } }
+        return cmds.any { try { CapturingProcessHandler(GeneralCommandLine(it)).runProcess(5000).exitCode == 0 } catch (_: Exception) { false } }
     }
     
     /** Show CLI not found error (must call on any thread, will dispatch to EDT) */
@@ -662,7 +667,25 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun ensureTerminalUi() { val f = terminalVirtualFile; if (f != null && OpenCodeTerminalFileEditorProvider.hasWidget(f)) focusTerminalUI() else createTerminalUIInternal(hostname, port ?: return, password, false) }
     private fun ensureWebUi() { if (webVirtualFile != null) focusTerminalUI() else createWebUI(hostname, port ?: return) }
     private fun showHeadlessStatusDialog() { ApplicationManager.getApplication().invokeLater { if (Messages.showYesNoDialog(project, "Connected to $hostname:$port (Headless). Disconnect?", "OpenCode", "Disconnect", "Keep", Messages.getInformationIcon()) == Messages.YES) disconnectAndReset() } }
-    private fun schedulePasteAttempt(t: String, l: Int, d: Long) { if (l <= 0 || project.isDisposed) return; AppExecutorUtil.getAppScheduledExecutorService().schedule({ ApplicationManager.getApplication().invokeLater { if (!project.isDisposed && !pasteToTerminal(t)) schedulePasteAttempt(t, l - 1, d) } }, d, TimeUnit.MILLISECONDS) }
+    
+    private fun schedulePasteAttempt(t: String, l: Int, d: Long) { 
+        if (l <= 0 || project.isDisposed) {
+            if (l <= 0 && !project.isDisposed) {
+                logger.warn("[Paste] All retries exhausted for: $t")
+            }
+            return
+        }
+        AppExecutorUtil.getAppScheduledExecutorService().schedule({ 
+            ApplicationManager.getApplication().invokeLater { 
+                if (!project.isDisposed) {
+                    if (!pasteToTerminal(t)) {
+                        schedulePasteAttempt(t, l - 1, d)
+                    }
+                }
+            } 
+        }, d, TimeUnit.MILLISECONDS) 
+    }
+
     private fun extractPartMessageInfo(p: JsonElement): PartMessageInfo? { if (!p.isJsonObject) return null; val o = p.asJsonObject; val mId = o.get("messageID")?.asString; val sId = o.get("sessionID")?.asString; return if (mId != null && sId != null) PartMessageInfo(sId, mId) else null }
     private data class PartMessageInfo(val sessionId: String, val messageId: String)
 }

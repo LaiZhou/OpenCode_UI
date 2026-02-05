@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.7"
+version = "1.0.8"
 
 repositories {
     mavenCentral()
@@ -41,11 +41,11 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.7</h2>
+            <h2>1.0.8</h2>
             <ul>
-              <li>Prevent task-complete notifications from stacking by replacing the previous idle notification.</li>
-              <li>Restore in-IDE balloon notifications for the OpenCode group.</li>
-              <li>Improve OS-level notifications for task completion.</li>
+                <li>Fix: Connection timeouts on Windows caused by slow OpenCode server startup.</li>
+                <li>Improvement: Increased startup wait time to 30s and enhanced reconnection logic.</li>
+                <li>Improvement: Increased HTTP request timeouts for better stability under high load.</li>
             </ul>
         """.trimIndent()
     }

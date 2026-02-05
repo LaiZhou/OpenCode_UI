@@ -17,8 +17,8 @@ object PortFinder {
     private val logger = Logger.getInstance(PortFinder::class.java)
     private const val START_PORT = 4096
     private const val MAX_ATTEMPTS = 100
-    private const val CONNECT_TIMEOUT_MS = 2000
-    private const val READ_TIMEOUT_MS = 2000
+    private const val CONNECT_TIMEOUT_MS = 5000
+    private const val READ_TIMEOUT_MS = 5000
 
     /**
      * Finds an available port starting from START_PORT.
@@ -123,7 +123,7 @@ object PortFinder {
     fun waitForPort(
         port: Int,
         host: String = "127.0.0.1",
-        timeoutMs: Long = 5000,
+        timeoutMs: Long = 10000,
         requireHealth: Boolean = true
     ): Boolean {
         logger.info("Waiting for port $host:$port (timeout=${timeoutMs}ms, requireHealth=$requireHealth)")
@@ -151,7 +151,7 @@ object PortFinder {
         return false
     }
 
-    private fun isPortOpen(host: String, port: Int, timeoutMs: Int = 500): Boolean {
+    private fun isPortOpen(host: String, port: Int, timeoutMs: Int = 1000): Boolean {
         return try {
             java.net.Socket().use { socket ->
                 socket.connect(java.net.InetSocketAddress(host, port), timeoutMs)
