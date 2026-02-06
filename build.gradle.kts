@@ -43,7 +43,9 @@ intellijPlatform {
         changeNotes = """
             <h2>1.0.8</h2>
             <ul>
+                <li>Feature: Auto-detect OpenCode CLI at ~/.opencode/bin/opencode even when not in PATH.</li>
                 <li>Fix: Connection timeouts on Windows caused by slow OpenCode server startup.</li>
+                <li>Fix: Resolves "CLI not found" errors on Linux/Mac when IDE doesn't inherit shell PATH.</li>
                 <li>Improvement: Increased startup wait time to 30s and enhanced reconnection logic.</li>
                 <li>Improvement: Increased HTTP request timeouts for better stability under high load.</li>
             </ul>

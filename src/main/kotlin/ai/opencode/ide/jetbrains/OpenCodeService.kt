@@ -567,13 +567,14 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     private fun createWebTerminal(h: String, p: Int, pwd: String?) {
         AppExecutorUtil.getAppExecutorService().submit {
-            if (!checkOpenCodeCliAvailable()) {
+            val bin = detectOpenCodeBinary()
+            if (bin == null) {
                 showCliNotFoundError()
                 return@submit
             }
             ApplicationManager.getApplication().invokeLater {
                 hostname = h; port = p; lastMode = ConnectionMode.WEB
-                createTerminalUIInternal(h, p, pwd, true)
+                createTerminalUIInternal(h, p, pwd, true, bin)
             }
             // Increase timeout to 30s for all platforms
             if (!PortFinder.waitForPort(p, h, timeoutMs = 30000, requireHealth = true)) {
@@ -595,13 +596,14 @@ class OpenCodeService(private val project: Project) : Disposable {
             return
         }
         AppExecutorUtil.getAppExecutorService().submit {
-            if (!checkOpenCodeCliAvailable()) {
+            val bin = detectOpenCodeBinary()
+            if (bin == null) {
                 showCliNotFoundError()
                 return@submit
             }
             ApplicationManager.getApplication().invokeLater {
                 hostname = h; port = p; lastMode = ConnectionMode.TERMINAL
-                createTerminalUIInternal(h, p, pwd)
+                createTerminalUIInternal(h, p, pwd, true, bin)
             }
             // Increase timeout to 30s for all platforms (Windows startup can be slow)
             if (!PortFinder.waitForPort(p, h, timeoutMs = 30000)) {
@@ -613,7 +615,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
 
-    private fun createTerminalUIInternal(h: String, p: Int, pwd: String?, cont: Boolean = true) {
+    private fun createTerminalUIInternal(h: String, p: Int, pwd: String?, cont: Boolean = true, command: String? = null) {
         val t = "$OPEN_CODE_TAB_PREFIX($p)"
         val w = TerminalView.getInstance(project).createLocalShellWidget(project.basePath, t)
         OpenCodeTerminalLinkFilter.install(project, w)
@@ -621,14 +623,60 @@ class OpenCodeService(private val project: Project) : Disposable {
         terminalVirtualFile = f; OpenCodeTerminalFileEditorProvider.registerWidget(f, w)
         ApplicationManager.getApplication().invokeLater {
             terminalEditor = FileEditorManager.getInstance(project).openFile(f, true).firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
-            terminalEditor?.let { w.executeCommand(buildOpenCodeCommand(h, p, pwd, cont)); pinTerminalTab(f) }
+            terminalEditor?.let { 
+                val cmd = command ?: getOpenCodeBinary()
+                w.executeCommand(buildOpenCodeCommand(cmd, h, p, pwd, cont)); pinTerminalTab(f) 
+            }
         }
     }
 
-    private fun buildOpenCodeCommand(h: String, p: Int, pwd: String?, cont: Boolean): String {
-        val base = "opencode --hostname $h --port $p${if (cont) " --continue" else ""}"
+    private fun buildOpenCodeCommand(command: String, h: String, p: Int, pwd: String?, cont: Boolean): String {
+        // Quote command if it contains spaces (e.g. absolute path on Windows)
+        val cmdSafe = if (command.contains(" ")) "\"$command\"" else command
+        val base = "$cmdSafe --hostname $h --port $p${if (cont) " --continue" else ""}"
         if (pwd.isNullOrBlank()) return base
         return if (isWindows()) "cmd /c \"set \"OPENCODE_SERVER_PASSWORD=${pwd.replace("\"", "\\\"")}\" && $base\"" else "OPENCODE_SERVER_PASSWORD='${pwd.replace("'", "'\\''")}' $base"
+    }
+
+    @Volatile private var _cachedBinary: String? = null
+
+    private fun getOpenCodeBinary(): String {
+        _cachedBinary?.let { return it }
+
+        // Fast check (safe for EDT)
+        val home = System.getProperty("user.home")
+        val exe = if (isWindows()) ".exe" else ""
+        val fallback = java.io.File(home, ".opencode/bin/opencode$exe")
+        if (fallback.exists() && fallback.canExecute()) {
+            val path = fallback.absolutePath
+            logger.info("[OpenCode] Resolved CLI to fallback path: $path")
+            _cachedBinary = path
+            return path
+        }
+
+        return "opencode"
+    }
+
+    /** Detect OpenCode binary path (Background thread safe) */
+    private fun detectOpenCodeBinary(): String? {
+        // 1. Check fallback (Fast)
+        val home = System.getProperty("user.home")
+        val exe = if (isWindows()) ".exe" else ""
+        val fallback = java.io.File(home, ".opencode/bin/opencode$exe")
+        if (fallback.exists() && fallback.canExecute()) {
+            logger.info("[OpenCode] Detected CLI at fallback path: ${fallback.absolutePath}")
+            _cachedBinary = fallback.absolutePath
+            return fallback.absolutePath
+        }
+
+        // 2. Check PATH (Slow process execution)
+        if (checkOpenCodeCliAvailable()) {
+            logger.info("[OpenCode] CLI detected in PATH")
+            _cachedBinary = "opencode"
+            return "opencode"
+        }
+
+        return null
     }
 
     /** Check CLI availability (safe for background thread) */
