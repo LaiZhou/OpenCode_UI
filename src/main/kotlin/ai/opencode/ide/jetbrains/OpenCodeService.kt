@@ -643,15 +643,33 @@ class OpenCodeService(private val project: Project) : Disposable {
     private fun getOpenCodeBinary(): String {
         _cachedBinary?.let { return it }
 
-        // Fast check (safe for EDT)
+        // Fast check common paths (safe for EDT - no process execution)
         val home = System.getProperty("user.home")
-        val exe = if (isWindows()) ".exe" else ""
-        val fallback = java.io.File(home, ".opencode/bin/opencode$exe")
-        if (fallback.exists() && fallback.canExecute()) {
-            val path = fallback.absolutePath
-            logger.info("[OpenCode] Resolved CLI to fallback path: $path")
-            _cachedBinary = path
-            return path
+        val candidates = if (isWindows()) {
+            listOf(
+                java.io.File(home, ".opencode/bin/opencode.exe"),
+                java.io.File("C:\\Program Files\\opencode\\opencode.exe"),
+                java.io.File(System.getenv("LOCALAPPDATA") ?: "", "opencode\\opencode.exe"),
+            )
+        } else {
+            listOf(
+                java.io.File(home, ".opencode/bin/opencode"),
+                java.io.File("/opt/homebrew/bin/opencode"),
+                java.io.File("/usr/local/bin/opencode"),
+                java.io.File("/home/linuxbrew/.linuxbrew/bin/opencode"),
+                java.io.File(home, ".linuxbrew/bin/opencode"),
+                java.io.File("/usr/bin/opencode"),
+                java.io.File("/snap/bin/opencode"),
+            )
+        }
+        
+        for (candidate in candidates) {
+            if (candidate.exists() && candidate.canExecute()) {
+                val path = candidate.absolutePath
+                logger.info("[OpenCode] Resolved CLI to: $path")
+                _cachedBinary = path
+                return path
+            }
         }
 
         return "opencode"
@@ -659,17 +677,38 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     /** Detect OpenCode binary path (Background thread safe) */
     private fun detectOpenCodeBinary(): String? {
-        // 1. Check fallback (Fast)
         val home = System.getProperty("user.home")
         val exe = if (isWindows()) ".exe" else ""
-        val fallback = java.io.File(home, ".opencode/bin/opencode$exe")
-        if (fallback.exists() && fallback.canExecute()) {
-            logger.info("[OpenCode] Detected CLI at fallback path: ${fallback.absolutePath}")
-            _cachedBinary = fallback.absolutePath
-            return fallback.absolutePath
+        
+        // Check common installation paths (ordered by priority)
+        val candidates = if (isWindows()) {
+            listOf(
+                java.io.File(home, ".opencode/bin/opencode.exe"),
+                java.io.File("C:\\Program Files\\opencode\\opencode.exe"),
+                java.io.File("C:\\Program Files (x86)\\opencode\\opencode.exe"),
+                java.io.File(System.getenv("LOCALAPPDATA") ?: "", "opencode\\opencode.exe"),
+            )
+        } else {
+            listOf(
+                java.io.File(home, ".opencode/bin/opencode"),           // npm global install
+                java.io.File("/opt/homebrew/bin/opencode"),             // macOS ARM Homebrew
+                java.io.File("/usr/local/bin/opencode"),                // macOS Intel Homebrew / Linux standard
+                java.io.File("/home/linuxbrew/.linuxbrew/bin/opencode"),// Linux Homebrew
+                java.io.File(home, ".linuxbrew/bin/opencode"),          // Linux Homebrew (user install)
+                java.io.File("/usr/bin/opencode"),                      // System package manager
+                java.io.File("/snap/bin/opencode"),                     // Snap install
+            )
+        }
+        
+        for (candidate in candidates) {
+            if (candidate.exists() && candidate.canExecute()) {
+                logger.info("[OpenCode] Detected CLI at: ${candidate.absolutePath}")
+                _cachedBinary = candidate.absolutePath
+                return candidate.absolutePath
+            }
         }
 
-        // 2. Check PATH (Slow process execution)
+        // Fallback: Check PATH (may fail in sandboxed environments like Snap)
         if (checkOpenCodeCliAvailable()) {
             logger.info("[OpenCode] CLI detected in PATH")
             _cachedBinary = "opencode"
@@ -711,9 +750,52 @@ class OpenCodeService(private val project: Project) : Disposable {
         else createLocalTerminal(h, p, pwd) 
     }
     private fun focusTerminalUI() { terminalVirtualFile?.let { FileEditorManager.getInstance(project).openFile(it, true) } ?: webVirtualFile?.let { FileEditorManager.getInstance(project).openFile(it, true) } }
-    private fun restoreUiForMode() { when (lastMode) { ConnectionMode.TERMINAL -> ensureTerminalUi(); ConnectionMode.WEB -> ensureWebUi(); ConnectionMode.REMOTE -> showHeadlessStatusDialog(); else -> showConnectionDialog() } }
-    private fun ensureTerminalUi() { val f = terminalVirtualFile; if (f != null && OpenCodeTerminalFileEditorProvider.hasWidget(f)) focusTerminalUI() else createTerminalUIInternal(hostname, port ?: return, password, false) }
+    private fun restoreUiForMode() { 
+        when (lastMode) { 
+            ConnectionMode.TERMINAL -> ensureTerminalUi()
+            ConnectionMode.WEB -> ensureWebUi()
+            ConnectionMode.REMOTE -> restoreRemoteConnection()
+            else -> showConnectionDialog() 
+        } 
+    }
+    private fun ensureTerminalUi() { 
+        val f = terminalVirtualFile
+        if (f != null && OpenCodeTerminalFileEditorProvider.hasWidget(f)) {
+            focusTerminalUI()
+        } else {
+            // Terminal UI doesn't exist, need to create new terminal and start opencode
+            try {
+                createTerminalUIInternal(hostname, port ?: return, password, false)
+            } catch (e: Exception) {
+                logger.warn("[OpenCode] Failed to create terminal UI", e)
+                ApplicationManager.getApplication().invokeLater {
+                    Messages.showErrorDialog(project, "Failed to create terminal: ${e.message}", "OpenCode")
+                }
+            }
+        }
+    }
     private fun ensureWebUi() { if (webVirtualFile != null) focusTerminalUI() else createWebUI(hostname, port ?: return) }
+    private fun restoreRemoteConnection() {
+        // For remote connections, verify connection is alive and show status
+        val p = port ?: return
+        val h = hostname
+        AppExecutorUtil.getAppExecutorService().submit {
+            val running = PortFinder.isOpenCodeRunningOnPort(p, h, username, password)
+            ApplicationManager.getApplication().invokeLater {
+                if (project.isDisposed) return@invokeLater
+                if (running) {
+                    if (!isConnected.get()) {
+                        // Reconnect SSE if not connected
+                        initializeApiClient(h, p)
+                        startConnectionManager()
+                    }
+                    Messages.showInfoMessage(project, "Connected to $h:$p", "OpenCode")
+                } else {
+                    Messages.showWarningDialog(project, "Remote server $h:$p is not reachable.", "OpenCode")
+                }
+            }
+        }
+    }
     private fun showHeadlessStatusDialog() { ApplicationManager.getApplication().invokeLater { if (Messages.showYesNoDialog(project, "Connected to $hostname:$port (Headless). Disconnect?", "OpenCode", "Disconnect", "Keep", Messages.getInformationIcon()) == Messages.YES) disconnectAndReset() } }
     
     private fun schedulePasteAttempt(t: String, l: Int, d: Long) { 
