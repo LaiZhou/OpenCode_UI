@@ -178,6 +178,13 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     fun removeConnectionListener(listener: (Boolean) -> Unit) { connectionListeners.remove(listener) }
 
+    fun onTerminalDisposed() {
+        if (isConnected.get() || port != null) {
+            logger.info("[OpenCode] Terminal disposed (timeout or closed). Resetting connection state.")
+            disconnectAndReset()
+        }
+    }
+
     // ==================== Event Handling & Barrier ====================
 
     private fun handleEvent(event: OpenCodeEvent) {
@@ -477,7 +484,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         connectionManagerTask?.cancel(true); sseListener?.disconnect(); isConnected.set(false); isConnecting.set(false)
         turnMessageIds.clear(); turnPendingPayloads.clear(); turnSnapshots.clear(); turnIdleWaiting.clear(); turnBarrierTasks.values.forEach { it.cancel(false) }; turnBarrierTasks.clear()
         terminateProcess()
-        terminalVirtualFile?.let { OpenCodeTerminalFileEditorProvider.unregisterWidget(it) }
+        terminalVirtualFile?.let { OpenCodeTerminalFileEditorProvider.disposeWidget(it, null) }
         terminalVirtualFile = null; terminalEditor = null; webVirtualFile = null; port = null; hostname = "127.0.0.1"; apiClient = null
     }
 

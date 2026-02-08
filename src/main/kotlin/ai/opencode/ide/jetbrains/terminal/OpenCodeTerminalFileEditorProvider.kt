@@ -6,6 +6,8 @@ import com.intellij.openapi.fileEditor.FileEditorPolicy
 import com.intellij.openapi.fileEditor.FileEditorProvider
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.components.service
+import ai.opencode.ide.jetbrains.OpenCodeService
 import com.intellij.openapi.vfs.VirtualFile
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
 import com.intellij.openapi.application.ApplicationManager
@@ -60,7 +62,7 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
             // Only schedule if we actually have a widget to dispose
             if (!terminalWidgets.containsKey(file)) return
 
-            logger.debug("Scheduling disposal check for ${file.name} in 5000ms")
+            logger.debug("Scheduling disposal check for ${file.name} in 60000ms")
             
             val task = AppExecutorUtil.getAppScheduledExecutorService().schedule({
                 // Must run on EDT to check FileEditorManager status safely
@@ -78,10 +80,10 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
                         logger.debug("Aborting disposal for ${file.name}: File is still open (move/split detected)")
                     } else {
                         logger.info("Disposing ${file.name}: File is truly closed")
-                        disposeWidget(file)
+                        disposeWidget(file, project)
                     }
                 }
-            }, 5000, TimeUnit.MILLISECONDS)
+            }, 60000, TimeUnit.MILLISECONDS)
             
             disposalTasks[file] = task
         }
@@ -100,7 +102,7 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
             }
         }
 
-        fun disposeWidget(file: OpenCodeTerminalVirtualFile) {
+        fun disposeWidget(file: OpenCodeTerminalVirtualFile, project: Project?) {
             // Remove from tasks map to keep it clean
             disposalTasks.remove(file)
             
@@ -111,6 +113,11 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
                     widget.dispose()
                 } catch (e: Exception) {
                     logger.warn("Error disposing terminal widget", e)
+                }
+                
+                // Notify service to clean up connection state if this was a timed disposal
+                if (project != null && !project.isDisposed) {
+                    project.service<OpenCodeService>().onTerminalDisposed()
                 }
             }
         }
@@ -126,7 +133,7 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
             disposalTasks.clear()
             
             // Dispose all widgets
-            terminalWidgets.keys.forEach { disposeWidget(it) }
+            terminalWidgets.keys.forEach { disposeWidget(it, null) }
             terminalWidgets.clear()
         }
     }
