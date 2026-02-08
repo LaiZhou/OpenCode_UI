@@ -44,6 +44,7 @@ intellijPlatform {
             <h2>1.0.9</h2>
             <ul>
                 <li>Fix: clean opencode process when exit or idle timeout.</li>
+                <li>Fix: in Project View Add to OpenCode Terminal, directory selections now send the directory path instead of all child file paths.</li>
             </ul>
         """.trimIndent()
     }

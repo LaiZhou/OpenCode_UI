@@ -55,7 +55,9 @@ class SendSelectionToTerminalAction : AnAction() {
             }
         } else if (virtualFiles != null && virtualFiles.isNotEmpty()) {
             // Project View selection: @path per file/directory
-            for (file in virtualFiles) {
+            val focusedFile = e.getData(CommonDataKeys.VIRTUAL_FILE)
+            val normalizedSelection = normalizeProjectSelection(virtualFiles, focusedFile)
+            for (file in normalizedSelection) {
                 val relativePath = getRelativePath(project, file)
                 val referencePath = formatPathReference(relativePath)
                 textToSend.append("@$referencePath ")
@@ -95,5 +97,33 @@ class SendSelectionToTerminalAction : AnAction() {
         } else {
             path
         }
+    }
+
+    private fun normalizeProjectSelection(
+        selectedFiles: Array<VirtualFile>,
+        focusedFile: VirtualFile?
+    ): List<VirtualFile> {
+        val all = LinkedHashMap<String, VirtualFile>()
+        selectedFiles.forEach { all[it.path] = it }
+
+        // Some IDE versions may provide descendants in VIRTUAL_FILE_ARRAY when a directory is selected.
+        // If focused item is a directory but missing from array, add it to preserve directory semantics.
+        if (focusedFile != null && focusedFile.isDirectory) {
+            all.putIfAbsent(focusedFile.path, focusedFile)
+        }
+
+        val sorted = all.values.sortedBy { it.path.length }
+        val kept = mutableListOf<VirtualFile>()
+        for (candidate in sorted) {
+            val candidatePath = PathUtil.toSystemIndependentPath(candidate.path)
+            val hasParentSelected = kept.any { parent ->
+                val parentPath = PathUtil.toSystemIndependentPath(parent.path)
+                candidatePath == parentPath || candidatePath.startsWith("$parentPath/")
+            }
+            if (!hasParentSelected) {
+                kept.add(candidate)
+            }
+        }
+        return kept
     }
 }

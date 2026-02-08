@@ -12,6 +12,7 @@ class FakeOpenCodeServer(val port: Int) {
     private val sseClients = CopyOnWriteArrayList<OutputStream>()
     private val diffResponses = ConcurrentHashMap<String, String>()
     private val diffDelays = ConcurrentHashMap<String, Long>()
+    val receivedPrompts = CopyOnWriteArrayList<String>()
     
     val activePort: Int
         get() = server.address.port
@@ -23,6 +24,22 @@ class FakeOpenCodeServer(val port: Int) {
             val resp = "No context found for request".toByteArray()
             ex.sendResponseHeaders(404, resp.size.toLong())
             ex.responseBody.use { it.write(resp) }
+        }
+
+        server.createContext("/tui/append-prompt") { ex ->
+            if (ex.requestMethod == "POST") {
+                val body = ex.requestBody.reader().readText()
+                println("  [FakeServer] POST /tui/append-prompt: $body")
+                // Keep raw JSON for assertions in tests.
+                receivedPrompts.add(body)
+                
+                val resp = "{}".toByteArray()
+                ex.sendResponseHeaders(200, resp.size.toLong())
+                ex.responseBody.use { it.write(resp) }
+            } else {
+                ex.sendResponseHeaders(405, 0)
+                ex.responseBody.close()
+            }
         }
 
         server.createContext("/global/health") { ex ->
