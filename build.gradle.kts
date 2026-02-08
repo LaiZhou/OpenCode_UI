@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.8"
+version = "1.0.9"
 
 repositories {
     mavenCentral()
@@ -41,14 +41,9 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.8</h2>
+            <h2>1.0.9</h2>
             <ul>
-                <li>Feature: Auto-detect OpenCode CLI at multiple common paths (Homebrew, npm, etc.).</li>
-                <li>Fix: Remote connection "Restore UI" crash (Issue #14) - now properly restores connection state.</li>
-                <li>Fix: CLI detection in sandboxed environments (Snap PyCharm) where PATH is restricted.</li>
-                <li>Fix: Connection timeouts on Windows caused by slow OpenCode server startup.</li>
-                <li>Fix: Resolves "CLI not found" errors on Linux/Mac when IDE doesn't inherit shell PATH.</li>
-                <li>Improvement: Increased startup wait time to 30s and enhanced reconnection logic.</li>
+                <li>Fix: clean opencode process when exit or idle timeout.</li>
             </ul>
         """.trimIndent()
     }
