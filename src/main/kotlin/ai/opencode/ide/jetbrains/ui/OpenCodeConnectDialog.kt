@@ -28,17 +28,21 @@ class OpenCodeConnectDialog(
         val hostname: String,
         val port: Int,
         val password: String?,
-        val useWebInterface: Boolean
+        val useWebInterface: Boolean,
+        val customBasePath: String? = null
     )
 
     private val addressField = JBTextField("127.0.0.1:$defaultPort")
     private val passwordField = JBPasswordField()
+    private val basePathField = JBTextField()
     
     var hostname: String = "127.0.0.1"
         private set
     var port: Int = defaultPort
         private set
     var password: String? = null
+        private set
+    var customBasePath: String? = null
         private set
     var useWebInterface: Boolean = false
         private set
@@ -52,11 +56,12 @@ class OpenCodeConnectDialog(
 
     override fun createCenterPanel(): JComponent {
         val panel = JPanel(BorderLayout(0, JBUI.scale(8)))
-        panel.preferredSize = Dimension(JBUI.scale(300), JBUI.scale(140))
+        panel.preferredSize = Dimension(JBUI.scale(350), JBUI.scale(180))
 
-        val formPanel = JPanel(GridLayout(4, 1, 0, JBUI.scale(4)))
+        val formPanel = JPanel(GridLayout(6, 1, 0, JBUI.scale(4)))
         val addressLabel = JBLabel("Server address:")
         val passwordLabel = JBLabel("Server password (optional):")
+        val basePathLabel = JBLabel("Custom base path (optional):")
 
         // Load saved values
         val props = PropertiesComponent.getInstance()
@@ -74,14 +79,20 @@ class OpenCodeConnectDialog(
             // Ignore if password retrieval fails
         }
 
+        // Load saved custom base path
+        basePathField.text = props.getValue(PROP_CUSTOM_BASE_PATH, "")
+
         addressField.toolTipText = "Format: hostname:port (e.g., 127.0.0.1:4096)"
         passwordField.toolTipText = "OPENCODE_SERVER_PASSWORD"
         passwordField.emptyText.text = "For remote OpenCode servers"
+        basePathField.toolTipText = "Override project base path for opencode.exe working directory"
 
         formPanel.add(addressLabel)
         formPanel.add(addressField)
         formPanel.add(passwordLabel)
         formPanel.add(passwordField)
+        formPanel.add(basePathLabel)
+        formPanel.add(basePathField)
 
         panel.add(formPanel, BorderLayout.CENTER)
 
@@ -126,6 +137,9 @@ class OpenCodeConnectDialog(
         val passwordValue = passwordField.password.concatToString().trim()
         password = passwordValue.ifBlank { null }
         
+        val basePathValue = basePathField.text.trim()
+        customBasePath = basePathValue.ifBlank { null }
+
         useWebInterface = false
 
         // Save values for next time
@@ -145,12 +159,20 @@ class OpenCodeConnectDialog(
             // Ignore if password save fails
         }
 
+        // Save custom base path
+        if (!customBasePath.isNullOrBlank()) {
+            props.setValue(PROP_CUSTOM_BASE_PATH, customBasePath!!)
+        } else {
+            props.unsetValue(PROP_CUSTOM_BASE_PATH)
+        }
+
         super.doOKAction()
     }
 
     companion object {
         private const val PROP_LAST_ADDRESS = "opencode.lastAddress"
         private const val PROP_LAST_PASSWORD = "opencode.lastPassword"
+        private const val PROP_CUSTOM_BASE_PATH = "opencode.customBasePath"
         
         /**
          * Shows the dialog and returns the result.
@@ -159,7 +181,7 @@ class OpenCodeConnectDialog(
         fun show(project: Project, defaultPort: Int): ConnectionInfo? {
             val dialog = OpenCodeConnectDialog(project, defaultPort)
             return if (dialog.showAndGet()) {
-                ConnectionInfo(dialog.hostname, dialog.port, dialog.password, dialog.useWebInterface)
+                ConnectionInfo(dialog.hostname, dialog.port, dialog.password, dialog.useWebInterface, dialog.customBasePath)
             } else {
                 null
             }
