@@ -1,7 +1,10 @@
 package ai.opencode.ide.jetbrains.ui
 
 import com.intellij.ide.util.PropertiesComponent
+import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.guessModuleDir
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.components.JBLabel
@@ -34,7 +37,9 @@ class OpenCodeConnectDialog(
 
     private val addressField = JBTextField("127.0.0.1:$defaultPort")
     private val passwordField = JBPasswordField()
-    private val basePathField = JBTextField()
+    private val basePathField = ComboBox<String>().apply {
+        isEditable = true
+    }
     
     var hostname: String = "127.0.0.1"
         private set
@@ -80,7 +85,19 @@ class OpenCodeConnectDialog(
         }
 
         // Load saved custom base path
-        basePathField.text = props.getValue(PROP_CUSTOM_BASE_PATH, "")
+        val savedPath = props.getValue(PROP_CUSTOM_BASE_PATH, "")
+
+        // Populate module paths
+        val moduleManager = ModuleManager.getInstance(project)
+        val modules = moduleManager.modules
+        val paths = modules.mapNotNull { it.guessModuleDir()?.path }.sorted()
+        paths.forEach { basePathField.addItem(it) }
+
+        if (savedPath.isNotBlank()) {
+            basePathField.item = savedPath
+        } else {
+            basePathField.selectedIndex = -1
+        }
 
         addressField.toolTipText = "Format: hostname:port (e.g., 127.0.0.1:4096)"
         passwordField.toolTipText = "OPENCODE_SERVER_PASSWORD"
@@ -137,7 +154,7 @@ class OpenCodeConnectDialog(
         val passwordValue = passwordField.password.concatToString().trim()
         password = passwordValue.ifBlank { null }
         
-        val basePathValue = basePathField.text.trim()
+        val basePathValue = (basePathField.editor.item as? String)?.trim() ?: ""
         customBasePath = basePathValue.ifBlank { null }
 
         useWebInterface = false
