@@ -134,7 +134,7 @@ The plugin uses a single terminal tab per project named **"OpenCode({port})"**.
 Install the OpenCode CLI:
 
 ```bash
-npm install -g opencode
+npm install -g opencode-ai
 ```
 
 Or download from [opencode.ai/download](https://opencode.ai/download)
