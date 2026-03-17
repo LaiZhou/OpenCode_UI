@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.0.9"
+version = "1.1.0"
 
 repositories {
     mavenCentral()
@@ -41,10 +41,10 @@ intellijPlatform {
         }
 
         changeNotes = """
-            <h2>1.0.9</h2>
+            <h2>1.1.0</h2>
             <ul>
-                <li>Fix: clean opencode process when exit or idle timeout.</li>
-                <li>Fix: in Project View Add to OpenCode Terminal, directory selections now send the directory path instead of all child file paths.</li>
+                <li>New: Custom base path support — added a "Custom base path" dropdown in the connection dialog, allowing users to specify a working directory for OpenCode terminal sessions. Automatically populated with detected project modules.</li>
+                <li>Fix: Fixed the OpenCode CLI install command in README to match official download instructions.</li>
             </ul>
         """.trimIndent()
     }
