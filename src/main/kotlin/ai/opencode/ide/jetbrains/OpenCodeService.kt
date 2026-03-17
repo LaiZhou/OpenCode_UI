@@ -511,12 +511,14 @@ class OpenCodeService(private val project: Project) : Disposable {
         AppExecutorUtil.getAppExecutorService().submit {
             val suggested = PortFinder.findAvailablePort()
             ApplicationManager.getApplication().invokeLater {
-                OpenCodeConnectDialog.show(project, suggested)?.let { processConnectionChoice(it.hostname, it.port, it.password, it.useWebInterface) }
+                OpenCodeConnectDialog.show(project, suggested)?.let { 
+                    processConnectionChoice(it.hostname, it.port, it.password, it.useWebInterface, it.customBasePath) 
+                }
             }
         }
     }
 
-    private fun processConnectionChoice(h: String, p: Int, pwd: String?, web: Boolean) {
+    private fun processConnectionChoice(h: String, p: Int, pwd: String?, web: Boolean, customBasePath: String? = null) {
         val safeH = h.trim().ifBlank { "127.0.0.1" }
         val local = safeH in listOf("0.0.0.0", "127.0.0.1", "localhost")
         
@@ -530,7 +532,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                     lastMode = if (!local) ConnectionMode.REMOTE else if (web) ConnectionMode.WEB else ConnectionMode.TERMINAL
                     // For remote (!local), strict headless unless web mode.
                     // For local, if running, we also just connect (headless or web), we do NOT spawn a new terminal.
-                    connectToExistingServer(safeH, p, a, web, web)
+                    connectToExistingServer(safeH, p, a, web, web, customBasePath)
                 } else if (occupied) {
                     val choice = Messages.showYesNoDialog(
                         project,
@@ -542,7 +544,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                     )
                     if (choice == Messages.YES) {
                         lastMode = if (!local) ConnectionMode.REMOTE else if (web) ConnectionMode.WEB else ConnectionMode.TERMINAL
-                        connectToExistingServer(safeH, p, a, web, web)
+                        connectToExistingServer(safeH, p, a, web, web, customBasePath)
                     } else {
                         showConnectionDialog()
                     }
@@ -554,16 +556,16 @@ class OpenCodeService(private val project: Project) : Disposable {
                          showConnectionDialog()
                     } else {
                         lastMode = if (web) ConnectionMode.WEB else ConnectionMode.TERMINAL
-                        if (web) createWebTerminal(safeH, p, a.password) else createLocalTerminal(safeH, p, a.password)
+                        if (web) createWebTerminal(safeH, p, a.password, customBasePath) else createLocalTerminal(safeH, p, a.password, customBasePath)
                     }
                 }
             }
         }
     }
 
-    private fun connectToExistingServer(h: String, p: Int, a: ProcessAuthDetector.ServerAuth, ui: Boolean, web: Boolean) {
+    private fun connectToExistingServer(h: String, p: Int, a: ProcessAuthDetector.ServerAuth, ui: Boolean, web: Boolean, customBasePath: String? = null) {
         hostname = h; port = p; username = a.username; password = a.password
-        if (ui) { if (web) createWebUI(h, p) else createTerminalUIInternal(h, p, a.password, false) }
+        if (ui) { if (web) createWebUI(h, p) else createTerminalUIInternal(h, p, a.password, false, null, customBasePath) }
         else { ApplicationManager.getApplication().invokeLater { Messages.showInfoMessage(project, "Connected to $h:$p", "OpenCode") } }
         initializeApiClient(h, p); startConnectionManager()
     }
@@ -572,7 +574,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         webVirtualFile = WebModeSupport.openWebTab(project, h, p, password) { if (webVirtualFile == null) terminateProcess() }
     }
 
-    private fun createWebTerminal(h: String, p: Int, pwd: String?) {
+    private fun createWebTerminal(h: String, p: Int, pwd: String?, customBasePath: String? = null) {
         AppExecutorUtil.getAppExecutorService().submit {
             val bin = detectOpenCodeBinary()
             if (bin == null) {
@@ -581,7 +583,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             }
             ApplicationManager.getApplication().invokeLater {
                 hostname = h; port = p; lastMode = ConnectionMode.WEB
-                createTerminalUIInternal(h, p, pwd, true, bin)
+                createTerminalUIInternal(h, p, pwd, true, bin, customBasePath)
             }
             // Increase timeout to 30s for all platforms
             if (!PortFinder.waitForPort(p, h, timeoutMs = 30000, requireHealth = true)) {
@@ -595,11 +597,11 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
 
-    private fun createLocalTerminal(h: String, p: Int, pwd: String?) {
+    private fun createLocalTerminal(h: String, p: Int, pwd: String?, customBasePath: String? = null) {
         val safeH = h.trim().ifBlank { "127.0.0.1" }
         if (safeH !in listOf("0.0.0.0", "127.0.0.1", "localhost")) {
             // Guard: Never attempt to spawn local terminal for remote host
-            connectToExistingServer(safeH, p, ProcessAuthDetector.ServerAuth("opencode", pwd), false, false)
+            connectToExistingServer(safeH, p, ProcessAuthDetector.ServerAuth("opencode", pwd), false, false, customBasePath)
             return
         }
         AppExecutorUtil.getAppExecutorService().submit {
@@ -610,7 +612,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             }
             ApplicationManager.getApplication().invokeLater {
                 hostname = h; port = p; lastMode = ConnectionMode.TERMINAL
-                createTerminalUIInternal(h, p, pwd, true, bin)
+                createTerminalUIInternal(h, p, pwd, true, bin, customBasePath)
             }
             // Increase timeout to 30s for all platforms (Windows startup can be slow)
             if (!PortFinder.waitForPort(p, h, timeoutMs = 30000)) {
@@ -622,9 +624,10 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
 
-    private fun createTerminalUIInternal(h: String, p: Int, pwd: String?, cont: Boolean = true, command: String? = null) {
+    private fun createTerminalUIInternal(h: String, p: Int, pwd: String?, cont: Boolean = true, command: String? = null, customBasePath: String? = null) {
         val t = "$OPEN_CODE_TAB_PREFIX($p)"
-        val w = TerminalView.getInstance(project).createLocalShellWidget(project.basePath, t)
+        val wd = customBasePath ?: project.basePath
+        val w = TerminalView.getInstance(project).createLocalShellWidget(wd, t)
         OpenCodeTerminalLinkFilter.install(project, w)
         val f = OpenCodeTerminalVirtualFile(t)
         terminalVirtualFile = f; OpenCodeTerminalFileEditorProvider.registerWidget(f, w)
@@ -632,7 +635,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             terminalEditor = FileEditorManager.getInstance(project).openFile(f, true).firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
             terminalEditor?.let { 
                 val cmd = command ?: getOpenCodeBinary()
-                w.executeCommand(buildOpenCodeCommand(cmd, h, p, pwd, cont)); pinTerminalTab(f) 
+                w.executeCommand(buildOpenCodeCommand(cmd, h, p, pwd, cont)); pinTerminalTab(f)
             }
         }
     }
