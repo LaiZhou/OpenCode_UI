@@ -106,6 +106,12 @@ class OpenCodeService(private val project: Project) : Disposable {
         ApplicationManager.getApplication().invokeLater(it) 
     }
 
+    internal var pasteDispatch: ((Runnable) -> Unit) -> Unit = { task ->
+        AppExecutorUtil.getAppScheduledExecutorService().schedule({
+            ApplicationManager.getApplication().invokeLater { task.run() }
+        }, 100L, TimeUnit.MILLISECONDS)
+    }
+
     // ==================== Public API ====================
 
     fun focusOrCreateTerminal(interactive: Boolean = false) {
@@ -322,14 +328,12 @@ class OpenCodeService(private val project: Project) : Disposable {
         try {
             val files = diffs.mapNotNull { diff -> 
                 PathUtil.resolveProjectPath(project, diff.file)?.let { 
-                    val ioFile = java.io.File(it)
-                    // If file is deleted, we must refresh the parent directory to detect deletion
-                    if (!ioFile.exists()) ioFile.parentFile else ioFile
+                    java.io.File(it).takeIf { it.exists() }
                 } 
             }
             if (files.isNotEmpty()) {
-                logger.info("[OpenCode] Forcing VFS refresh for ${files.size} paths: ${files.map { it.absolutePath }}")
-                com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshIoFiles(files, false, false, null)
+                logger.info("[OpenCode] Forcing VFS refresh for ${files.size} paths")
+                com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshIoFiles(files, true, false, null)
             }
         } catch (e: Exception) {
             logger.debug("[OpenCode] VFS refresh skipped: ${e.message}")
@@ -815,15 +819,13 @@ class OpenCodeService(private val project: Project) : Disposable {
             }
             return
         }
-        AppExecutorUtil.getAppScheduledExecutorService().schedule({ 
-            ApplicationManager.getApplication().invokeLater { 
-                if (!project.isDisposed) {
-                    if (!pasteToTerminal(t)) {
-                        schedulePasteAttempt(t, l - 1, d)
-                    }
+        pasteDispatch {
+            if (!project.isDisposed) {
+                if (!pasteToTerminal(t)) {
+                    schedulePasteAttempt(t, l - 1, d)
                 }
-            } 
-        }, d, TimeUnit.MILLISECONDS) 
+            }
+        }
     }
 
     private fun extractPartMessageInfo(p: JsonElement): PartMessageInfo? { if (!p.isJsonObject) return null; val o = p.asJsonObject; val mId = o.get("messageID")?.asString; val sId = o.get("sessionID")?.asString; return if (mId != null && sId != null) PartMessageInfo(sId, mId) else null }

@@ -9,9 +9,9 @@ import ai.opencode.ide.jetbrains.session.SessionManager
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
-import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.MapDataContext
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class SendSelectionToTerminalActionTest : BasePlatformTestCase() {
@@ -68,19 +68,17 @@ class SendSelectionToTerminalActionTest : BasePlatformTestCase() {
 
         val event = AnActionEvent.createFromDataContext("place", null, dataContext)
 
-        // 3. Perform Action
+        // 3. Override paste dispatch to run synchronously (no thread hops)
+        service.pasteDispatch = { task -> task() }
+
+        // 4. Perform Action
         action.actionPerformed(event)
 
-        // 4. Verify
-        // Wait for server to receive request (async)
-        val start = System.currentTimeMillis()
-        while (server?.receivedPrompts?.isEmpty() == true && System.currentTimeMillis() - start < 2000) {
-            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
-            Thread.sleep(50)
-        }
+        // 5. Verify
+        val latch = server?.promptLatch ?: return
+        assertTrue("Server should have received a prompt", latch.await(5, TimeUnit.SECONDS))
 
         val prompts = server?.receivedPrompts ?: emptyList()
-        assertFalse("Server should have received a prompt", prompts.isEmpty())
         
         val lastPrompt = prompts.last()
         println("Received prompt JSON: $lastPrompt")

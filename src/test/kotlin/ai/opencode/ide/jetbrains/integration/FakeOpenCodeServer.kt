@@ -5,6 +5,7 @@ import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
 class FakeOpenCodeServer(val port: Int) {
@@ -13,6 +14,7 @@ class FakeOpenCodeServer(val port: Int) {
     private val diffResponses = ConcurrentHashMap<String, String>()
     private val diffDelays = ConcurrentHashMap<String, Long>()
     val receivedPrompts = CopyOnWriteArrayList<String>()
+    val promptLatch = CountDownLatch(1)
     
     val activePort: Int
         get() = server.address.port
@@ -32,6 +34,7 @@ class FakeOpenCodeServer(val port: Int) {
                 println("  [FakeServer] POST /tui/append-prompt: $body")
                 // Keep raw JSON for assertions in tests.
                 receivedPrompts.add(body)
+                promptLatch.countDown()
                 
                 val resp = "{}".toByteArray()
                 ex.sendResponseHeaders(200, resp.size.toLong())
