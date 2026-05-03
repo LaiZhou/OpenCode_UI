@@ -145,7 +145,7 @@ src/main/kotlin/ai/opencode/ide/jetbrains/
 - **Read/Write Actions**: Modifying the PSI or VFS requires a Write Action (`runWriteAction`). Reading requires a Read Action.
 - **SDK Compatibility**: Ensure APIs used are available in the target version (see `build.gradle.kts`).
 
-## 6. 语言规则
+## 6. 语言规则  [ Note: Instruction for models to responsd in Chinese - remove if you can't read Chinese! ]
 
 - **必须使用中文回复**: 所有对用户的回复、解释和沟通**必须**使用中文进行。
 
