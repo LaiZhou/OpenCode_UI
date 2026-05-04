@@ -22,8 +22,10 @@ class RealProcessIntegrationTest : BasePlatformTestCase() {
         port = PortFinder.findAvailablePort()
         
         // Find opencode executable
+        val isWin = System.getProperty("os.name", "").lowercase().contains("windows")
+        val candidates = if (isWin) listOf("opencode.cmd", "opencode.bat", "opencode.exe", "opencode") else listOf("opencode")
         val path = System.getenv("PATH").split(File.pathSeparator)
-            .map { File(it, "opencode") }
+            .flatMap { dir -> candidates.map { File(dir, it) } }
             .firstOrNull { it.exists() && it.canExecute() }
             ?.absolutePath ?: throw IllegalStateException("opencode binary not found in PATH")
 

@@ -7,28 +7,20 @@ import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.session.SessionManager
 import com.intellij.history.Label
 import com.intellij.openapi.project.Project
-import java.lang.reflect.Proxy
+import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.util.concurrent.CopyOnWriteArrayList
-import org.junit.After
-import org.junit.Before
-import org.junit.Test
 
 /**
  * Logic Unit Test using Fake Server.
  * Simplified suite covering core Diff scenarios.
  */
-class OpenCodeLogicTest {
-    
-    @Before
-    fun setUp() {
+class OpenCodeLogicTest : BasePlatformTestCase() {
+
+    override fun setUp() {
+        super.setUp()
         OpenCodeService.DEBOUNCE_MS = 0L
     }
-    
-    @After
-    fun tearDown() {
-    }
-    
-    @Test
+
     fun testDiffScenarios() {
         println("=== Starting OpenCode Logic Tests (Diff Isolation) ===")
         
@@ -38,12 +30,14 @@ class OpenCodeLogicTest {
         val port = server.activePort
         
         // Setup Test Runner (Mock IDE)
-        val runner = TestRunner(port)
+        val runner = TestRunner(project, port)
         
         val r = runner
         val s = server
+        val baseDir = project.basePath!!
         
         try {
+            java.io.File(baseDir).mkdirs()
             // Wait for connection to establish
             Thread.sleep(500)
             
@@ -127,8 +121,7 @@ class OpenCodeLogicTest {
             Thread.sleep(100)
             
             // 2. Simulate AI writing a new file to disk
-            val tempDir = System.getProperty("java.io.tmpdir")
-            val newFile = java.io.File(tempDir, "new.kt")
+            val newFile = java.io.File(baseDir, "new.kt")
             newFile.writeText("fun new() {}")
             r.sessionManager.simulateFileCreation("new.kt") // Signal VFS creation
             
@@ -196,7 +189,7 @@ class OpenCodeLogicTest {
             r.resetState()
             
             // 1. Prepare file
-            val toDelete = java.io.File(tempDir, "to_delete.kt")
+            val toDelete = java.io.File(baseDir, "to_delete.kt")
             toDelete.writeText("delete me")
             
             // 2. Start Turn
@@ -266,7 +259,7 @@ class OpenCodeLogicTest {
             s.broadcast("""{"type":"session.status","properties":{"sessionID":"s1","status":{"type":"busy"}}}""")
             Thread.sleep(100)
             
-            val file1 = java.io.File(tempDir, "1.md")
+            val file1 = java.io.File(baseDir, "1.md")
             file1.writeText("created content")
             r.sessionManager.simulateFileCreation("1.md")
             s.broadcast("""{"type":"file.edited","properties":{"file":"1.md"}}""")
@@ -320,36 +313,19 @@ class OpenCodeLogicTest {
     }
 }
 
-class TestRunner(val serverPort: Int) {
-    val mockProject: Project
+class TestRunner(val project: Project, val serverPort: Int) {
     val mockDiffViewer: MockDiffViewerService
     val sessionManager: TestSessionManager
     val openCodeService: OpenCodeService
 
     init {
-        // Setup Mocks
-        val tempDir = System.getProperty("java.io.tmpdir")
-        mockProject = Proxy.newProxyInstance(
-            Project::class.java.classLoader,
-            arrayOf(Project::class.java)
-        ) { _, method, _ ->
-            when (method.name) {
-                "getBasePath" -> tempDir
-                "isDisposed" -> false
-                "toString" -> "MockProject"
-                "hashCode" -> 12345
-                "equals" -> false
-                else -> null
-            }
-        } as Project
-
-        mockDiffViewer = MockDiffViewerService(mockProject)
-        sessionManager = TestSessionManager(mockProject)
+        mockDiffViewer = MockDiffViewerService(project)
+        sessionManager = TestSessionManager(project)
         
         // Initialize Service with REAL ApiClient pointing to Fake Server
         val apiClient = OpenCodeApiClient("127.0.0.1", serverPort)
         
-        openCodeService = OpenCodeService(mockProject)
+        openCodeService = OpenCodeService(project)
         openCodeService.setTestDeps(sessionManager, mockDiffViewer, apiClient)
         
         // Mock UI execution
