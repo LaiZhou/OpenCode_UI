@@ -106,9 +106,9 @@ class OpenCodeService(private val project: Project) : Disposable {
         ApplicationManager.getApplication().invokeLater(it) 
     }
 
-    internal var pasteDispatch: ((Runnable) -> Unit) -> Unit = { task ->
+    internal var pasteDispatch: (() -> Unit) -> Unit = { task ->
         AppExecutorUtil.getAppScheduledExecutorService().schedule({
-            ApplicationManager.getApplication().invokeLater { task.run() }
+            ApplicationManager.getApplication().invokeLater { task() }
         }, 100L, TimeUnit.MILLISECONDS)
     }
 
