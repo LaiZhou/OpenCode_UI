@@ -48,6 +48,7 @@ class SseEventListener(
 
     private val gson = GsonBuilder()
         .registerTypeAdapter(OpenCodeEvent::class.java, OpenCodeEventDeserializer())
+        .registerTypeAdapter(FileDiff::class.java, FileDiffDeserializer())
         .create()
 
     private var call: Call? = null

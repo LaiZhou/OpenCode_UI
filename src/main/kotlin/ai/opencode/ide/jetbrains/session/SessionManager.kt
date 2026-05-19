@@ -690,7 +690,7 @@ open class SessionManager(private val project: Project) : Disposable {
      */
     fun resolveBeforeContent(relativePath: String, diff: FileDiff, snapshot: TurnSnapshot): String {
         val absPath = PathUtil.resolveProjectPath(project, relativePath)
-        val serverBefore = diff.before
+        val serverBefore = diff.before ?: ""
 
         // 1. VFS Creation Safety: If we detected a physical creation event, force before to empty.
         // This takes precedence because we KNOW it's a new file from our perspective.
