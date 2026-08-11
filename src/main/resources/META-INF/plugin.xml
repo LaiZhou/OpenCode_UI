@@ -62,8 +62,7 @@
     <projectService serviceImplementation="ai.opencode.ide.jetbrains.session.SessionManager"/>
     <projectService serviceImplementation="ai.opencode.ide.jetbrains.diff.DiffViewerService"/>
 
-    <!-- File Editor Provider -->
-    <fileEditorProvider implementation="ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditorProvider"/>
+    <!-- Web mode remains an editor tab; terminal mode is hosted by the OpenCode ToolWindow. -->
     <fileEditorProvider implementation="ai.opencode.ide.jetbrains.web.OpenCodeWebFileEditorProvider"/>
 
     <!-- Notifications -->
@@ -76,8 +75,4 @@
 
   </extensions>
 
-  <projectListeners>
-    <listener class="ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalEditorListener"
-              topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
-  </projectListeners>
 </idea-plugin>

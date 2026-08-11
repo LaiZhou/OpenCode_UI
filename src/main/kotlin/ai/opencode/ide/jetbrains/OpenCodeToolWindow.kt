@@ -6,42 +6,25 @@ import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ex.ToolWindowManagerListener
 
-import com.intellij.ui.content.ContentFactory
-import javax.swing.JPanel
-
 /**
  * OpenCode sidebar icon.
  *
- * Clicking the sidebar icon triggers focusOrCreateTerminal() - no panel content is displayed.
- * The tool window is immediately hidden after triggering the action.
+ * The service owns the terminal widget. The tool window only owns its Content wrapper,
+ * so hiding the stripe window does not terminate the terminal session.
  */
 class OpenCodeToolWindowFactory : ToolWindowFactory {
 
     override fun shouldBeAvailable(project: Project): Boolean = true
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        // Add dummy content to avoid "Empty Tool Window" warning
-        val content = ContentFactory.getInstance().createContent(JPanel(), "", false)
-        toolWindow.contentManager.addContent(content)
-
-        // Do NOT focus terminal on creation to respect user's choice at IDE startup.
-        // The terminal will only be created when the user explicitly clicks the icon
-        // or uses the keyboard shortcut.
-
-        // If the tool window is visible due to restored IDE state, hide it quietly.
-        if (toolWindow.isVisible) {
-            toolWindow.hide()
-        }
-
-        // Listen for when this tool window is shown (sidebar icon clicked)
+        val service = project.service<OpenCodeService>()
+        service.bindToolWindow(toolWindow)
         project.messageBus.connect(toolWindow.disposable).subscribe(
             ToolWindowManagerListener.TOPIC,
             object : ToolWindowManagerListener {
-                override fun toolWindowShown(tw: ToolWindow) {
-                    if (tw.id == "OpenCode") {
-                        // Interactive mode: Always show dialog/status if needed
-                        project.service<OpenCodeService>().focusOrCreateTerminal(interactive = true)
-                        tw.hide()
+                override fun toolWindowShown(shown: ToolWindow) {
+                    if (shown.id == toolWindow.id) {
+                        service.onToolWindowShown()
                     }
                 }
             }
