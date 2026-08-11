@@ -6,10 +6,7 @@ import ai.opencode.ide.jetbrains.api.models.*
 import ai.opencode.ide.jetbrains.diff.DiffViewerService
 import ai.opencode.ide.jetbrains.session.SessionManager
 import ai.opencode.ide.jetbrains.session.TurnSnapshot
-import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditor
-import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditorProvider
 import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalLinkFilter
-import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalVirtualFile
 import ai.opencode.ide.jetbrains.ui.OpenCodeConnectDialog
 import ai.opencode.ide.jetbrains.util.PathUtil
 import ai.opencode.ide.jetbrains.util.PortFinder
@@ -31,10 +28,11 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.wm.ToolWindow
+import com.intellij.ui.content.Content
+import com.intellij.ui.content.ContentFactory
 import com.intellij.util.concurrency.AppExecutorUtil
 
 import org.jetbrains.plugins.terminal.TerminalView
@@ -73,8 +71,9 @@ class OpenCodeService(private val project: Project) : Disposable {
     private var remoteReconnectFailures = 0
     private var remoteReconnectDialogShown = false
 
-    private var terminalVirtualFile: OpenCodeTerminalVirtualFile? = null
-    private var terminalEditor: OpenCodeTerminalFileEditor? = null
+    private var terminalWidget: org.jetbrains.plugins.terminal.ShellTerminalWidget? = null
+    private var toolWindow: ToolWindow? = null
+    private var terminalContent: Content? = null
     private var webVirtualFile: OpenCodeWebVirtualFile? = null
 
     private val connectionListeners = CopyOnWriteArrayList<(Boolean) -> Unit>()
@@ -106,6 +105,17 @@ class OpenCodeService(private val project: Project) : Disposable {
         ApplicationManager.getApplication().invokeLater(it) 
     }
 
+    /** Called by the factory once the IDE has created the OpenCode ToolWindow. */
+    internal fun bindToolWindow(window: ToolWindow) {
+        toolWindow = window
+        attachTerminalWidget()
+    }
+
+    internal fun onToolWindowShown() {
+        if (terminalWidget != null) focusTerminalUI()
+        else focusOrCreateTerminal(interactive = true)
+    }
+
     // ==================== Public API ====================
 
     fun focusOrCreateTerminal(interactive: Boolean = false) {
@@ -123,10 +133,9 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     fun hasTerminalUI(): Boolean {
-        val tf = terminalVirtualFile
-        if (tf != null && FileEditorManager.getInstance(project).openFiles.contains(tf)) return true
+        if (terminalWidget != null) return true
         val wf = webVirtualFile
-        if (wf != null && FileEditorManager.getInstance(project).openFiles.contains(wf)) return true
+        if (wf != null) return true
         return false
     }
     
@@ -152,7 +161,7 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     fun focusOrCreateTerminalAndPaste(text: String) {
         if (text.isBlank() || project.isDisposed) return
-        if (apiClient == null && terminalEditor == null) { ApplicationManager.getApplication().invokeLater { Messages.showInfoMessage(project, "OpenCode not running.", "OpenCode") }; return }
+        if (apiClient == null && terminalWidget == null) { ApplicationManager.getApplication().invokeLater { Messages.showInfoMessage(project, "OpenCode not running.", "OpenCode") }; return }
         schedulePasteAttempt(text, 20, 100L)
         ApplicationManager.getApplication().invokeLater { focusTerminalUI() }
     }
@@ -478,19 +487,22 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
 
-    override fun dispose() { disconnectAndReset(); OpenCodeTerminalFileEditorProvider.clearAll() }
+    override fun dispose() { disconnectAndReset(); terminalWidget?.dispose(); terminalWidget = null; terminalContent = null }
 
     private fun disconnectAndReset() {
         connectionManagerTask?.cancel(true); sseListener?.disconnect(); isConnected.set(false); isConnecting.set(false)
         turnMessageIds.clear(); turnPendingPayloads.clear(); turnSnapshots.clear(); turnIdleWaiting.clear(); turnBarrierTasks.values.forEach { it.cancel(false) }; turnBarrierTasks.clear()
         terminateProcess()
-        terminalVirtualFile?.let { OpenCodeTerminalFileEditorProvider.disposeWidget(it, null) }
-        terminalVirtualFile = null; terminalEditor = null; webVirtualFile = null; port = null; hostname = "127.0.0.1"; apiClient = null
+        terminalWidget?.let {
+            try { it.dispose() } catch (_: Exception) {}
+        }
+        terminalContent?.let { content -> toolWindow?.contentManager?.removeContent(content, false) }
+        terminalWidget = null; terminalContent = null; webVirtualFile = null; port = null; hostname = "127.0.0.1"; apiClient = null
     }
 
     private fun terminateProcess() {
         try {
-            val process = terminalEditor?.terminalWidget?.processTtyConnector?.process
+            val process = terminalWidget?.processTtyConnector?.process
             if (process?.isAlive == true) {
                 process.destroy()
                 if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
@@ -625,19 +637,19 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun createTerminalUIInternal(h: String, p: Int, pwd: String?, cont: Boolean = true, command: String? = null, customBasePath: String? = null) {
+        terminalWidget?.let {
+            focusTerminalUI()
+            return
+        }
         val t = "$OPEN_CODE_TAB_PREFIX($p)"
         val wd = customBasePath ?: project.basePath
         val w = TerminalView.getInstance(project).createLocalShellWidget(wd, t)
         OpenCodeTerminalLinkFilter.install(project, w)
-        val f = OpenCodeTerminalVirtualFile(t)
-        terminalVirtualFile = f; OpenCodeTerminalFileEditorProvider.registerWidget(f, w)
-        ApplicationManager.getApplication().invokeLater {
-            terminalEditor = FileEditorManager.getInstance(project).openFile(f, true).firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
-            terminalEditor?.let { 
-                val cmd = command ?: getOpenCodeBinary()
-                w.executeCommand(buildOpenCodeCommand(cmd, h, p, pwd, cont)); pinTerminalTab(f)
-            }
-        }
+        terminalWidget = w
+        attachTerminalWidget()
+        val cmd = command ?: getOpenCodeBinary()
+        w.executeCommand(buildOpenCodeCommand(cmd, h, p, pwd, cont))
+        focusTerminalUI()
     }
 
     private fun buildOpenCodeCommand(command: String, h: String, p: Int, pwd: String?, cont: Boolean): String {
@@ -752,14 +764,23 @@ class OpenCodeService(private val project: Project) : Disposable {
     }
 
     private fun isWindows() = System.getProperty("os.name", "").lowercase().contains("windows")
-    private fun pinTerminalTab(f: VirtualFile) { try { FileEditorManagerEx.getInstanceEx(project).currentWindow?.setFilePinned(f, true) } catch (_: Exception) {} }
     private fun restartServer(m: ConnectionMode) { 
         val h = hostname; val p = port ?: return; val pwd = password; disconnectAndReset(); hostname = h; port = p; password = pwd; lastMode = m; 
         if (m == ConnectionMode.WEB) createWebTerminal(h, p, pwd) 
         else if (m == ConnectionMode.REMOTE) connectToExistingServer(h, p, ProcessAuthDetector.ServerAuth("opencode", pwd), false, false)
         else createLocalTerminal(h, p, pwd) 
     }
-    private fun focusTerminalUI() { terminalVirtualFile?.let { FileEditorManager.getInstance(project).openFile(it, true) } ?: webVirtualFile?.let { FileEditorManager.getInstance(project).openFile(it, true) } }
+    private fun focusTerminalUI() {
+        val window = toolWindow
+        val widget = terminalWidget
+        if (window != null && widget != null) {
+            window.show {
+                window.activate({ (widget.preferredFocusableComponent ?: widget.component).requestFocusInWindow() }, true)
+            }
+        } else if (webVirtualFile != null) {
+            FileEditorManager.getInstance(project).openFile(webVirtualFile!!, true)
+        }
+    }
     private fun restoreUiForMode() { 
         when (lastMode) { 
             ConnectionMode.TERMINAL -> ensureTerminalUi()
@@ -769,8 +790,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         } 
     }
     private fun ensureTerminalUi() { 
-        val f = terminalVirtualFile
-        if (f != null && OpenCodeTerminalFileEditorProvider.hasWidget(f)) {
+        if (terminalWidget != null) {
             focusTerminalUI()
         } else {
             // Terminal UI doesn't exist, need to create new terminal and start opencode
@@ -785,6 +805,15 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
     private fun ensureWebUi() { if (webVirtualFile != null) focusTerminalUI() else createWebUI(hostname, port ?: return) }
+
+    private fun attachTerminalWidget() {
+        val window = toolWindow ?: return
+        val widget = terminalWidget ?: return
+        if (terminalContent?.component === widget.component && terminalContent in window.contentManager.contents) return
+        terminalContent?.let { window.contentManager.removeContent(it, false) }
+        terminalContent = ContentFactory.getInstance().createContent(widget.component, "", false)
+        window.contentManager.addContent(terminalContent!!)
+    }
     private fun restoreRemoteConnection() {
         // For remote connections, verify connection is alive and show status
         val p = port ?: return
