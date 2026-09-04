@@ -53,7 +53,8 @@ Open **Settings** → **Plugins** → **Marketplace** → Search "OpenCode" → 
 
 Press `Cmd+Esc` (Mac) or `Ctrl+\` (Win/Linux) to open the connection dialog. You can:
 
-- **Connect to existing server**: Enter `host:port` (e.g., `127.0.0.1:58052`) and optional password to connect to OpenCode Desktop or any running OpenCode server. Authentication is detected automatically if available.
+- **Connect to existing server**: Enter `host:port` (e.g., `127.0.0.1:58052`) and optional password to connect to OpenCode Desktop or any running OpenCode server. A leading `http://` is accepted and stripped. Authentication is detected automatically if available. The plugin opens a terminal tab running `opencode attach http://host:port`, so the TUI, file links and diff review work exactly as they do for a local session.
+- **Connect to a remote server**: Same as above with the remote address (e.g., `10.0.0.5:4096`). The server must be reachable from your machine, which usually means it was started with `opencode serve --hostname 0.0.0.0`. The password field maps to `OPENCODE_SERVER_PASSWORD`.
 - **Create new terminal**: Use default `127.0.0.1:4096` to create a local OpenCode terminal session. The terminal tab will be named `OpenCode(4096)`.
 
 *Your last connection settings (address, mode, password) are remembered automatically.*
