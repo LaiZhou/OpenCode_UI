@@ -1,5 +1,7 @@
 package ai.opencode.ide.jetbrains.ui
 
+import ai.opencode.ide.jetbrains.util.ServerAddress
+
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.project.Project
@@ -99,7 +101,7 @@ class OpenCodeConnectDialog(
             basePathField.selectedIndex = -1
         }
 
-        addressField.toolTipText = "Format: hostname:port (e.g., 127.0.0.1:4096)"
+        addressField.toolTipText = "Format: hostname:port (e.g., 127.0.0.1:4096). A http:// prefix is accepted."
         passwordField.toolTipText = "OPENCODE_SERVER_PASSWORD"
         passwordField.emptyText.text = "For remote OpenCode servers"
         basePathField.toolTipText = "Override project base path for opencode.exe working directory"
@@ -119,37 +121,16 @@ class OpenCodeConnectDialog(
     override fun getPreferredFocusedComponent(): JComponent = addressField
 
     override fun doValidate(): ValidationInfo? {
-        val input = addressField.text.trim()
-        
-        if (input.isBlank()) {
-            return ValidationInfo("Server address cannot be empty", addressField)
+        return when (val result = ServerAddress.parse(addressField.text)) {
+            is ServerAddress.Result.Error -> ValidationInfo(result.message, addressField)
+            is ServerAddress.Result.Ok -> null
         }
-        
-        val parts = input.split(":")
-        if (parts.size != 2) {
-            return ValidationInfo("Invalid format. Expected: hostname:port", addressField)
-        }
-        
-        val host = parts[0].trim()
-        val portStr = parts[1].trim()
-        
-        if (host.isBlank()) {
-            return ValidationInfo("Hostname cannot be empty", addressField)
-        }
-        
-        val portNum = portStr.toIntOrNull()
-        if (portNum == null || portNum < 1 || portNum > 65535) {
-            return ValidationInfo("Port must be a number between 1 and 65535", addressField)
-        }
-        
-        return null
     }
 
     override fun doOKAction() {
-        val input = addressField.text.trim()
-        val parts = input.split(":")
-        hostname = parts[0].trim()
-        port = parts[1].trim().toInt()
+        val parsed = (ServerAddress.parse(addressField.text) as? ServerAddress.Result.Ok)?.address ?: return
+        hostname = parsed.hostname
+        port = parsed.port
 
         val passwordValue = passwordField.password.concatToString().trim()
         password = passwordValue.ifBlank { null }
