@@ -11,12 +11,16 @@ import java.net.ServerSocket
  * Port allocation strategy:
  * - Starts from port 4096 and increments until an available port is found
  * - Once a port is allocated, it is fixed for the lifetime of that session
- * - No scanning for existing servers - each project gets its own server instance
+ * - Server detection scans the same range [START_PORT, RANGE_END) downwards and
+ *   returns the highest occupied port
  */
 object PortFinder {
     private val logger = Logger.getInstance(PortFinder::class.java)
     private const val START_PORT = 4096
     private const val MAX_ATTEMPTS = 100
+
+    /** Exclusive upper bound shared by port allocation and server detection. */
+    private const val RANGE_END = START_PORT + MAX_ATTEMPTS
     private const val CONNECT_TIMEOUT_MS = 5000
     private const val READ_TIMEOUT_MS = 5000
 
@@ -28,14 +32,14 @@ object PortFinder {
      */
     fun findAvailablePort(): Int {
         logger.info("Searching for available port starting from $START_PORT")
-        for (port in START_PORT until START_PORT + MAX_ATTEMPTS) {
+        for (port in START_PORT until RANGE_END) {
             if (isPortAvailable(port)) {
                 logger.info("Found available port: $port")
                 return port
             }
             logger.debug("Port $port is not available")
         }
-        throw IOException("No available port found in range $START_PORT-${START_PORT + MAX_ATTEMPTS - 1}")
+        throw IOException("No available port found in range $START_PORT-${RANGE_END - 1}")
     }
 
     /**
@@ -74,7 +78,7 @@ object PortFinder {
         password: String? = null
     ): Boolean {
         return try {
-            val url = java.net.URL("http://$hostname:$port/global/health")
+            val url = java.net.URI("http://$hostname:$port/global/health").toURL()
             val connection = url.openConnection(Proxy.NO_PROXY) as java.net.HttpURLConnection
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
@@ -102,12 +106,16 @@ object PortFinder {
     }
 
     /**
-     * Scans for a running OpenCode server in the port range.
-     * @return The port number if a running server is found, null otherwise
+     * Scans for a running OpenCode server in the port range [START_PORT, RANGE_END),
+     * which is exactly the range [findAvailablePort] allocates from.
+     * Scans downwards so that the highest occupied port is returned first.
+     * @param healthCheck Predicate deciding whether a port hosts a healthy OpenCode server
+     * @return The highest port with a running server, null otherwise
      */
-    fun findRunningOpenCodeServer(): Int? {
-        for (port in START_PORT until START_PORT + MAX_ATTEMPTS) {
-            if (isOpenCodeRunningOnPort(port)) {
+    fun findLastRunningOpenCodeServer(healthCheck: (Int) -> Boolean = { isOpenCodeRunningOnPort(it) }): Int? {
+        for (port in RANGE_END - 1 downTo START_PORT) {
+            if (healthCheck(port)) {
+                logger.info("Found running OpenCode server on port: $port")
                 return port
             }
         }

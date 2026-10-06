@@ -72,12 +72,14 @@ object WebModeSupport {
         }
     }
 
-    private fun pinTab(project: Project, file: com.intellij.openapi.vfs.VirtualFile) {
+    fun pinTab(project: Project, file: com.intellij.openapi.vfs.VirtualFile) {
          try {
             val managerEx = FileEditorManagerEx.getInstanceEx(project)
-            managerEx.currentWindow?.let { window ->
-                if (!window.isFilePinned(file)) {
-                    window.setFilePinned(file, true)
+            val window = managerEx.currentWindow?.takeIf { it.isFileOpen(file) }
+                ?: managerEx.windows.firstOrNull { it.isFileOpen(file) }
+            window?.let {
+                if (!it.isFilePinned(file)) {
+                    it.setFilePinned(file, true)
                 }
             }
         } catch (e: Exception) {
