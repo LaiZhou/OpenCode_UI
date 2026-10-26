@@ -31,19 +31,25 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
         
         // Use ConcurrentHashMap to manage lifecycle manually (Strong References)
         private val terminalWidgets = ConcurrentHashMap<OpenCodeTerminalVirtualFile, ShellTerminalWidget>()
+
+        // Owning project per widget. This registry lives in the JVM-wide companion object, so
+        // tearing down one project must never dispose terminals that belong to another project.
+        private val widgetProjects = ConcurrentHashMap<OpenCodeTerminalVirtualFile, Project>()
         
         // Track pending disposal tasks
         private val disposalTasks = ConcurrentHashMap<OpenCodeTerminalVirtualFile, ScheduledFuture<*>>()
         
-        fun registerWidget(file: OpenCodeTerminalVirtualFile, widget: ShellTerminalWidget) {
+        fun registerWidget(file: OpenCodeTerminalVirtualFile, widget: ShellTerminalWidget, project: Project) {
             logger.debug("Registering terminal widget for file: ${file.name}")
             cancelDisposal(file) // Cancel any pending disposal if re-registering
             terminalWidgets[file] = widget
+            widgetProjects[file] = project
         }
         
         fun unregisterWidget(file: OpenCodeTerminalVirtualFile) {
             logger.debug("Unregistering terminal widget for file: ${file.name}")
             terminalWidgets.remove(file)
+            widgetProjects.remove(file)
             cancelDisposal(file)
         }
 
@@ -107,6 +113,7 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
             disposalTasks.remove(file)
             
             val widget = terminalWidgets.remove(file)
+            widgetProjects.remove(file)
             if (widget != null) {
                 logger.debug("Disposing terminal widget for file: ${file.name}")
                 try {
@@ -123,18 +130,17 @@ class OpenCodeTerminalFileEditorProvider : FileEditorProvider, DumbAware {
         }
         
         /**
-         * Clear all registered widgets.
-         * MUST be called during plugin unload (Project dispose).
+         * Dispose only the widgets owned by [project].
+         * Called when that project's OpenCode service is disposed.
          */
-        fun clearAll() {
-            logger.debug("Clearing all terminal widgets for dynamic plugin unload")
-            // Cancel all pending tasks
-            disposalTasks.values.forEach { it.cancel(false) }
-            disposalTasks.clear()
-            
-            // Dispose all widgets
-            terminalWidgets.keys.forEach { disposeWidget(it, null) }
-            terminalWidgets.clear()
+        fun clearProject(project: Project) {
+            val files = widgetProjects.entries.filter { it.value === project }.map { it.key }
+            if (files.isEmpty()) return
+            logger.debug("Clearing ${files.size} terminal widget(s) for project dispose")
+            files.forEach { file ->
+                disposalTasks.remove(file)?.cancel(false)
+                disposeWidget(file, null)
+            }
         }
     }
 

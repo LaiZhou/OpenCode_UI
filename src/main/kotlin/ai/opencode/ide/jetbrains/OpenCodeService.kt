@@ -478,7 +478,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
 
-    override fun dispose() { disconnectAndReset(); OpenCodeTerminalFileEditorProvider.clearAll() }
+    override fun dispose() { disconnectAndReset(); OpenCodeTerminalFileEditorProvider.clearProject(project) }
 
     private fun disconnectAndReset() {
         connectionManagerTask?.cancel(true); sseListener?.disconnect(); isConnected.set(false); isConnecting.set(false)
@@ -630,7 +630,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         val w = TerminalView.getInstance(project).createLocalShellWidget(wd, t)
         OpenCodeTerminalLinkFilter.install(project, w)
         val f = OpenCodeTerminalVirtualFile(t)
-        terminalVirtualFile = f; OpenCodeTerminalFileEditorProvider.registerWidget(f, w)
+        terminalVirtualFile = f; OpenCodeTerminalFileEditorProvider.registerWidget(f, w, project)
         ApplicationManager.getApplication().invokeLater {
             terminalEditor = FileEditorManager.getInstance(project).openFile(f, true).firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
             terminalEditor?.let { 
