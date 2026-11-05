@@ -64,7 +64,7 @@ class OpenCodeService(private val project: Project) : Disposable {
         private const val COMPLETION_RECHECK_MS = 2000L
         private const val MAX_COMPLETION_CHECKS = 1800
         private const val MIN_ANNOUNCE_INTERVAL_MS = 8000L
-        private const val COMPLETION_QUIET_MS = 12000L
+        private const val COMPLETION_QUIET_MS = 20000L
     }
 
     private var hostname: String = "127.0.0.1"
@@ -501,7 +501,7 @@ class OpenCodeService(private val project: Project) : Disposable {
             }
             if (announcedCompletionKeys[sessionId] == key) return@schedule
             if (gatingMarkerLogged.compareAndSet(false, true)) {
-                logger.info("[OpenCode] Completion gating v16 active (finishReason + dumb + tree + abort)")
+                logger.info("[OpenCode] Completion gating v17 active (finishReason + dumb + tree + abort)")
             }
             val tail = readSessionTail(sessionId)
             if (tail != null && tail.aborted) {
@@ -523,11 +523,11 @@ class OpenCodeService(private val project: Project) : Disposable {
                 if (attempt < MAX_COMPLETION_CHECKS) scheduleCompletionAnnouncement(sessionId, snapshot, attempt + 1)
                 return@schedule
             }
-            val lastActivity = lastActivityAt[sessionId] ?: 0L
+            val lastActivity = subtreeLastActivity(sessionId)
             val quietFor = System.currentTimeMillis() - lastActivity
             if (quietFor < COMPLETION_QUIET_MS) {
                 if (attempt % 15 == 0) {
-                    logger.info("[OpenCode] Completion deferred: only ${quietFor}ms since last activity for $sessionId")
+                    logger.info("[OpenCode] Completion deferred: only ${quietFor}ms since last activity in the session tree of $sessionId")
                 }
                 if (attempt < MAX_COMPLETION_CHECKS) scheduleCompletionAnnouncement(sessionId, snapshot, attempt + 1)
                 return@schedule
@@ -540,6 +540,27 @@ class OpenCodeService(private val project: Project) : Disposable {
             announcedCompletionKeys[sessionId] = key
             announceCompletion(sessionId, snapshot)
         }, delayMs, TimeUnit.MILLISECONDS)
+    }
+
+    private fun subtreeLastActivity(sessionId: String): Long {
+        val own = lastActivityAt[sessionId] ?: 0L
+        val client = apiClient ?: return own
+        val directory = project.basePath ?: return own
+        val sessions = try {
+            client.getSessions(directory)
+        } catch (e: Exception) {
+            return own
+        }
+        val childrenByParent = sessions.groupBy { it.parentID }
+        val subtree = HashSet<String>()
+        val queue = ArrayDeque<String>()
+        queue.add(sessionId)
+        while (queue.isNotEmpty() && subtree.size < 500) {
+            val current = queue.removeFirst()
+            if (!subtree.add(current)) continue
+            childrenByParent[current].orEmpty().forEach { queue.add(it.id) }
+        }
+        return subtree.maxOf { lastActivityAt[it] ?: 0L }
     }
 
     private fun isSubAgentSession(sessionId: String): Boolean {

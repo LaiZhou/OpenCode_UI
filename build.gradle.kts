@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "ai.opencode"
-version = "1.1.16"
+version = "1.1.17"
 
 repositories {
     mavenCentral()
@@ -41,6 +41,10 @@ intellijPlatform {
         }
 
         changeNotes = """
+            <h2>1.1.17</h2>
+            <ul>
+                <li>Fix: the "quiet" window now covers the whole session tree and is 20 seconds. The field log shows an announcement while a child session had just finished and the parent was about to resume: the child's last event was 0.2s before the announcement and the next parent message arrived 0.6s later.</li>
+            </ul>
             <h2>1.1.16</h2>
             <ul>
                 <li>Fix: closing one project no longer disconnects OpenCode in another project. Project teardown used to dispose every registered terminal (clearAll) and stop its pty process; the field log shows a second project's OpenCode logging "disposing all instances" 230ms after the first project closed. Teardown now only drops the plugin's own registrations and never kills a process.</li>
