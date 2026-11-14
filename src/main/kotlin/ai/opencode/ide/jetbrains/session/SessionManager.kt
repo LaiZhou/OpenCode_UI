@@ -28,8 +28,10 @@ import com.intellij.openapi.vfs.VirtualFileEvent
 import com.intellij.openapi.vfs.VirtualFileListener
 import com.intellij.openapi.vfs.VirtualFileMoveEvent
 import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vcs.changes.ChangeListManager
 import com.intellij.util.concurrency.AppExecutorUtil
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Manages the diff state for a single AI "turn" (busy -> idle cycle).
@@ -42,6 +44,14 @@ import java.util.concurrent.ConcurrentHashMap
 open class SessionManager(private val project: Project) : Disposable {
 
     private val logger = Logger.getInstance(SessionManager::class.java)
+
+    companion object {
+        private const val MAX_CAPTURED_FILE_BYTES = 1L * 1024 * 1024
+        private const val MAX_CAPTURED_TURN_BYTES = 64L * 1024 * 1024
+        private const val MAX_KNOWN_STATES = 5000
+        private const val MAX_KNOWN_STATE_BYTES = 64L * 1024 * 1024
+        private const val MAX_SYNTHETIC_DIFF_BYTES = 8L * 1024 * 1024
+    }
 
     // ==================== Turn State ====================
     
@@ -75,6 +85,12 @@ open class SessionManager(private val project: Project) : Disposable {
      * Key: Relative Path, Value: File Content
      */
     private var capturedBeforeContent = ConcurrentHashMap<String, String>()
+
+    /** Chars captured for the current turn, used to enforce [MAX_CAPTURED_TURN_BYTES]. */
+    private var capturedBeforeBytes = 0L
+    private val captureBudgetLock = Any()
+    private val captureBudgetExhausted = AtomicBoolean(false)
+    private val skippedCapturePaths = ConcurrentHashMap.newKeySet<String>()
     
     /** 
      * Cache of last known file content after a Reject operation.
@@ -82,6 +98,10 @@ open class SessionManager(private val project: Project) : Disposable {
      * and Server state is stale (e.g. Server thinks file is deleted).
      */
     private val lastKnownFileStates = ConcurrentHashMap<String, String>()
+
+    private val knownStateLock = Any()
+    private var lastKnownStateBytes = 0L
+    private val knownStateCapWarned = AtomicBoolean(false)
     
     /** Cache of known states at the START of the current turn */
     private var startOfTurnKnownState = HashMap<String, String>()
@@ -125,7 +145,10 @@ open class SessionManager(private val project: Project) : Disposable {
             captureContentBeforeChange(event.file)
         }
         
-        override fun fileDeleted(event: VirtualFileEvent) = onVfsChange(event.file)
+        override fun fileDeleted(event: VirtualFileEvent) {
+            removeKnownState(PathUtil.relativizeToProject(project, event.file.path))
+            onVfsChange(event.file)
+        }
         override fun contentsChanged(event: VirtualFileEvent) = onVfsChange(event.file)
         override fun fileMoved(event: VirtualFileMoveEvent) = onVfsChange(event.file)
         // fileCopied is rare for AI and caused compilation issues
@@ -139,10 +162,19 @@ open class SessionManager(private val project: Project) : Disposable {
         // Only capture if NOT already captured for this turn/gap cycle.
         // We want the ORIGINAL state before the first modification in this cycle.
         if (!capturedBeforeContent.containsKey(relativePath)) {
+            val skipReason = skipContentCaptureReason(file)
+            if (skipReason != null) {
+                // Keep the path so diff processing still sees the change; only the content is skipped.
+                vfsChangedFiles.add(relativePath)
+                if (skippedCapturePaths.add(relativePath)) {
+                    logger.info("[Turn #$turnNumber] Skipped content capture for: $relativePath ($skipReason)")
+                }
+                return
+            }
             try {
                 // Try VFS first
                 val content = VfsUtil.loadText(file)
-                capturedBeforeContent.putIfAbsent(relativePath, content)
+                storeCapturedContent(relativePath, content, file.length)
                 logger.info("[Turn #$turnNumber] Captured before content for: $relativePath (${content.length} chars)")
             } catch (e: Exception) {
                 logger.warn("[Turn #$turnNumber] VfsUtil load failed for $relativePath: ${e.message}. Trying java.io.File...")
@@ -151,7 +183,7 @@ open class SessionManager(private val project: Project) : Disposable {
                     val ioFile = File(file.path)
                     if (ioFile.exists()) {
                         val content = ioFile.readText()
-                        capturedBeforeContent.putIfAbsent(relativePath, content)
+                        storeCapturedContent(relativePath, content, ioFile.length())
                         logger.info("[Turn #$turnNumber] Captured via java.io.File for: $relativePath")
                     } else {
                         logger.warn("[Turn #$turnNumber] File not found on disk: $relativePath. Trying LocalHistory...")
@@ -160,7 +192,7 @@ open class SessionManager(private val project: Project) : Disposable {
                         val bytes = LocalHistory.getInstance().getByteContent(file) { true }
                         if (bytes != null && bytes.isNotEmpty()) {
                             val content = String(bytes, Charsets.UTF_8)
-                            capturedBeforeContent.putIfAbsent(relativePath, content)
+                            storeCapturedContent(relativePath, content, bytes.size.toLong())
                             logger.info("[Turn #$turnNumber] Captured via LocalHistory (Latest) for: $relativePath")
                         } else {
                             logger.warn("[Turn #$turnNumber] LocalHistory lookup returned null or empty for $relativePath")
@@ -170,6 +202,66 @@ open class SessionManager(private val project: Project) : Disposable {
                     logger.error("[Turn #$turnNumber] Failed to capture content for $relativePath", ioe)
                 }
             }
+        }
+    }
+
+    private fun skipContentCaptureReason(file: VirtualFile): String? {
+        if (file.length > MAX_CAPTURED_FILE_BYTES) {
+            return "${file.length} bytes exceeds the ${MAX_CAPTURED_FILE_BYTES / (1024 * 1024)}MB per-file limit"
+        }
+        if (file.fileType.isBinary) return "binary file type (${file.fileType.name})"
+        if (isIgnoredByVcs(file)) return "ignored by version control"
+        return null
+    }
+
+    private fun isIgnoredByVcs(file: VirtualFile): Boolean = try {
+        ChangeListManager.getInstance(project).isIgnoredFile(file)
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun storeCapturedContent(relativePath: String, content: String, byteSize: Long) {
+        synchronized(captureBudgetLock) {
+            if (capturedBeforeBytes + byteSize > MAX_CAPTURED_TURN_BYTES) {
+                vfsChangedFiles.add(relativePath)
+                if (captureBudgetExhausted.compareAndSet(false, true)) {
+                    logger.warn("[Turn #$turnNumber] Captured-content budget of ${MAX_CAPTURED_TURN_BYTES / (1024 * 1024)}MB exceeded; recording paths only for the rest of this turn")
+                }
+                return
+            }
+            capturedBeforeBytes += byteSize
+            capturedBeforeContent.putIfAbsent(relativePath, content)
+        }
+    }
+
+    private fun readFileCapped(file: File): String? {
+        if (file.length() > MAX_SYNTHETIC_DIFF_BYTES) {
+            logger.warn("[SyntheticDiff] Not reading ${file.path}: ${file.length()} bytes exceeds ${MAX_SYNTHETIC_DIFF_BYTES / (1024 * 1024)}MB")
+            return null
+        }
+        return file.readText()
+    }
+
+    private fun putKnownState(relativePath: String, content: String) {
+        synchronized(knownStateLock) {
+            val previous = lastKnownFileStates[relativePath]
+            val projectedEntries = lastKnownFileStates.size + if (previous == null) 1 else 0
+            val projectedBytes = lastKnownStateBytes - (previous?.length?.toLong() ?: 0L) + content.length
+            if (projectedEntries > MAX_KNOWN_STATES || projectedBytes > MAX_KNOWN_STATE_BYTES) {
+                if (knownStateCapWarned.compareAndSet(false, true)) {
+                    logger.warn("[Turn #$turnNumber] Known-state cache limit reached (${MAX_KNOWN_STATES} entries / ${MAX_KNOWN_STATE_BYTES / (1024 * 1024)}MB); skipping new entries")
+                }
+                return
+            }
+            lastKnownFileStates[relativePath] = content
+            lastKnownStateBytes = projectedBytes
+        }
+    }
+
+    private fun removeKnownState(relativePath: String) {
+        synchronized(knownStateLock) {
+            val removed = lastKnownFileStates.remove(relativePath) ?: return
+            lastKnownStateBytes = (lastKnownStateBytes - removed.length).coerceAtLeast(0L)
         }
     }
 
@@ -225,6 +317,9 @@ open class SessionManager(private val project: Project) : Disposable {
         serverEditedFiles.clear()
         aiCreatedFiles.clear()
         capturedBeforeContent.clear()
+        capturedBeforeBytes = 0L
+        captureBudgetExhausted.set(false)
+        skippedCapturePaths.clear()
         
         // Capture known state at start of turn (baseline for this turn)
         startOfTurnKnownState = HashMap(lastKnownFileStates)
@@ -264,7 +359,7 @@ open class SessionManager(private val project: Project) : Disposable {
                 val file = File(absPath)
                 if (file.exists() && file.isFile) {
                     try {
-                        lastKnownFileStates[relativePath] = file.readText()
+                        putKnownState(relativePath, file.readText())
                         logger.info("[Turn #$turnNumber] Updated known state for $relativePath")
                     } catch (e: Exception) {
                         logger.warn("[Turn #$turnNumber] Failed to capture known state for $relativePath: ${e.message}")
@@ -297,6 +392,9 @@ open class SessionManager(private val project: Project) : Disposable {
         serverEditedFiles = ConcurrentHashMap.newKeySet()
         aiCreatedFiles = ConcurrentHashMap.newKeySet()
         capturedBeforeContent = ConcurrentHashMap() // Rotate capture map
+        capturedBeforeBytes = 0L
+        captureBudgetExhausted.set(false)
+        skippedCapturePaths.clear()
         
         return snapshot
     }
@@ -551,7 +649,10 @@ open class SessionManager(private val project: Project) : Disposable {
 
         val afterContent = if (fileExists) {
             try {
-                file.readText()
+                readFileCapped(file) ?: run {
+                    logger.warn("[SyntheticDiff] $relativePath -> SKIP: after content exceeds ${MAX_SYNTHETIC_DIFF_BYTES / (1024 * 1024)}MB")
+                    return null
+                }
             } catch (e: Exception) {
                 logger.warn("[SyntheticDiff] $relativePath -> Failed to read file: ${e.message}")
                 ""
@@ -675,7 +776,7 @@ open class SessionManager(private val project: Project) : Disposable {
                     try {
                         val content = file.readText()
                         // Ensure we store using the canonical relative path key
-                        lastKnownFileStates[relativePath] = content
+                        putKnownState(relativePath, content)
                         logger.info("[Turn #$turnNumber] Updated known state (late refresh) for $relativePath")
                     } catch (e: Exception) {
                         logger.warn("[Turn #$turnNumber] Failed to update known state for $relativePath: ${e.message}")
@@ -724,7 +825,7 @@ open class SessionManager(private val project: Project) : Disposable {
                 val file = File(absPath)
                 if (file.exists()) {
                     logger.info("[Turn #${snapshot.turnNumber}] Server before is empty but intent is Delete. Using disk content as before.")
-                    return file.readText()
+                    return readFileCapped(file) ?: serverBefore
                 }
             } catch (e: Exception) {
                 logger.warn("[Turn #${snapshot.turnNumber}] Failed to read disk fallback for $relativePath", e)

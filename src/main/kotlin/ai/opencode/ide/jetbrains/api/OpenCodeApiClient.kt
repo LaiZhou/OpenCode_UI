@@ -66,6 +66,54 @@ open class OpenCodeApiClient(
         return getSessionStatuses(directory).find { it.status.isBusy() }
     }
 
+    data class SessionTailState(
+        val messageId: String,
+        val completed: Boolean,
+        val runningTools: Int,
+        val errorName: String? = null,
+        val finishReason: String? = null
+    ) {
+        val aborted: Boolean get() = errorName?.contains("Abort", ignoreCase = true) == true
+    }
+
+    /**
+     * State of the newest assistant message of a session: a turn is still running while that
+     * message has no completion time or still contains a pending/running tool part.
+     */
+    open fun getSessionTailState(sessionId: String, directory: String): SessionTailState? {
+        val serverPath = PathUtil.toOpenCodeServerPath(directory)
+        val url = "$baseUrl/session/$sessionId/message?directory=${encode(serverPath)}"
+        val body = getString(url) ?: return null
+        return try {
+            val array = com.google.gson.JsonParser.parseString(body).asJsonArray
+            for (index in array.size() - 1 downTo 0) {
+                val message = array[index].asJsonObject
+                val info = message.getAsJsonObject("info") ?: continue
+                if (info.get("role")?.asString != "assistant") continue
+                val messageId = info.get("id")?.asString ?: continue
+                val completed = info.getAsJsonObject("time")?.get("completed")?.isJsonNull == false
+                val errorName = info.getAsJsonObject("error")?.get("name")?.asString
+                var runningTools = 0
+                var finishReason: String? = null
+                message.getAsJsonArray("parts")?.forEach { part ->
+                    val partObject = part.asJsonObject
+                    when (partObject.get("type")?.asString) {
+                        "tool" -> {
+                            val status = partObject.getAsJsonObject("state")?.get("status")?.asString
+                            if (status == "pending" || status == "running") runningTools++
+                        }
+                        "step-finish" -> finishReason = partObject.get("reason")?.asString
+                    }
+                }
+                return SessionTailState(messageId, completed, runningTools, errorName, finishReason)
+            }
+            null
+        } catch (e: Exception) {
+            logger.warn("[OpenCode] Failed to parse message tail: ${e.message}")
+            null
+        }
+    }
+
     open fun getSessionDiff(sessionId: String, directory: String, messageId: String? = null): List<FileDiff> {
         val serverPath = PathUtil.toOpenCodeServerPath(directory)
         var url = "$baseUrl/session/$sessionId/diff?directory=${encode(serverPath)}"
@@ -121,6 +169,21 @@ open class OpenCodeApiClient(
     }
 
     private fun encode(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")
+
+    private fun getString(url: String): String? {
+        val request = Request.Builder().url(url).get().build()
+        return try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) response.body?.string() ?: "" else {
+                    logger.warn("[OpenCode] GET failed: $url (HTTP ${response.code})")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            logger.error("[OpenCode] GET error: $url", e)
+            null
+        }
+    }
 
     private fun <T> get(url: String, clazz: Class<T>): T? {
         val request = Request.Builder().url(url).get().build()
