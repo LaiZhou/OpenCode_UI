@@ -41,6 +41,20 @@ Click the **OpenCode** icon in the right sidebar to instantly focus or create an
 - **JetBrains IDE**: IntelliJ IDEA, WebStorm, PyCharm, etc. (2025.2+)
 - **OpenCode CLI**: Install via `npm install -g opencode` or see [opencode.ai/download](https://opencode.ai/download)
 
+### OpenCode CLI versions
+
+The plugin detects the installed CLI syntax automatically (`opencode --version`, falling back to
+`opencode --help`) and generates the matching command line:
+
+| CLI | Launch behavior |
+|-----|-----------------|
+| v1 (`0.x` / `1.x`) | The TUI starts the server with the root `--hostname` / `--port` flags. |
+| v2 (`2.x`) | The plugin starts `opencode serve --hostname H --port P`, then attaches the TUI with `opencode --server http://H:P`. Both processes share one password, generated when none is configured because v2 always protects its server with one. Web mode opens the v2 web UI. |
+
+> With a v2 CLI the terminal and web UI start correctly. The diff/session integration still talks
+> to the v1 REST/SSE API (`/session`, `/event`, ...), which v2 replaced with `/api/*`; those IDE
+> features therefore stay inactive until the v2 API migration lands. See issue #35 for status.
+
 ## Installation
 
 **Plugin URL**: https://plugins.jetbrains.com/plugin/29744-opencode-ui
