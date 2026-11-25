@@ -11,6 +11,7 @@ import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalFileEditorProvider
 import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalLinkFilter
 import ai.opencode.ide.jetbrains.terminal.OpenCodeTerminalVirtualFile
 import ai.opencode.ide.jetbrains.ui.OpenCodeConnectDialog
+import ai.opencode.ide.jetbrains.util.OpenCodeCliCompatibility
 import ai.opencode.ide.jetbrains.util.PathUtil
 import ai.opencode.ide.jetbrains.util.PortFinder
 import ai.opencode.ide.jetbrains.util.ProcessAuthDetector
@@ -76,6 +77,9 @@ class OpenCodeService(private val project: Project) : Disposable {
     private var terminalVirtualFile: OpenCodeTerminalVirtualFile? = null
     private var terminalEditor: OpenCodeTerminalFileEditor? = null
     private var webVirtualFile: OpenCodeWebVirtualFile? = null
+    @Volatile private var cliMode: OpenCodeCliCompatibility.Mode? = null
+    @Volatile private var serverProcess: Process? = null
+    @Volatile private var v2ServerPassword: String? = null
 
     private val connectionListeners = CopyOnWriteArrayList<(Boolean) -> Unit>()
     private var connectionManagerTask: ScheduledFuture<*>? = null
@@ -496,6 +500,7 @@ class OpenCodeService(private val project: Project) : Disposable {
                 if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly()
             }
         } catch (_: Exception) {}
+        stopV2Server()
     }
 
     private fun showReconnectOrNewDialog(running: Boolean) {
@@ -565,8 +570,23 @@ class OpenCodeService(private val project: Project) : Disposable {
 
     private fun connectToExistingServer(h: String, p: Int, a: ProcessAuthDetector.ServerAuth, ui: Boolean, web: Boolean, customBasePath: String? = null) {
         hostname = h; port = p; username = a.username; password = a.password
-        if (ui) { if (web) createWebUI(h, p) else createTerminalUIInternal(h, p, a.password, false, null, customBasePath) }
-        else { ApplicationManager.getApplication().invokeLater { Messages.showInfoMessage(project, "Connected to $h:$p", "OpenCode") } }
+        if (ui) {
+            if (web) {
+                createWebUI(h, p)
+            } else {
+                AppExecutorUtil.getAppExecutorService().submit {
+                    val bin = detectOpenCodeBinary()
+                    val mode = if (bin != null) detectCliMode(bin) else OpenCodeCliCompatibility.Mode.LEGACY
+                    ApplicationManager.getApplication().invokeLater {
+                        if (!project.isDisposed) {
+                            createTerminalUIInternal(h, p, a.password, false, null, customBasePath, mode)
+                        }
+                    }
+                }
+            }
+        } else {
+            ApplicationManager.getApplication().invokeLater { Messages.showInfoMessage(project, "Connected to $h:$p", "OpenCode") }
+        }
         initializeApiClient(h, p); startConnectionManager()
     }
 
@@ -581,9 +601,15 @@ class OpenCodeService(private val project: Project) : Disposable {
                 showCliNotFoundError()
                 return@submit
             }
+            val mode = detectCliMode(bin)
+            val effectivePassword = if (mode == OpenCodeCliCompatibility.Mode.V2) {
+                startV2Server(bin, h, p, pwd, customBasePath) ?: return@submit
+            } else {
+                pwd
+            }
             ApplicationManager.getApplication().invokeLater {
-                hostname = h; port = p; lastMode = ConnectionMode.WEB
-                createTerminalUIInternal(h, p, pwd, true, bin, customBasePath)
+                hostname = h; port = p; password = effectivePassword; lastMode = ConnectionMode.WEB
+                createTerminalUIInternal(h, p, effectivePassword, true, bin, customBasePath, mode)
             }
             // Increase timeout to 30s for all platforms
             if (!PortFinder.waitForPort(p, h, timeoutMs = 30000, requireHealth = true)) {
@@ -610,9 +636,15 @@ class OpenCodeService(private val project: Project) : Disposable {
                 showCliNotFoundError()
                 return@submit
             }
+            val mode = detectCliMode(bin)
+            val effectivePassword = if (mode == OpenCodeCliCompatibility.Mode.V2) {
+                startV2Server(bin, safeH, p, pwd, customBasePath) ?: return@submit
+            } else {
+                pwd
+            }
             ApplicationManager.getApplication().invokeLater {
-                hostname = h; port = p; lastMode = ConnectionMode.TERMINAL
-                createTerminalUIInternal(h, p, pwd, true, bin, customBasePath)
+                hostname = h; port = p; password = effectivePassword; lastMode = ConnectionMode.TERMINAL
+                createTerminalUIInternal(h, p, effectivePassword, true, bin, customBasePath, mode)
             }
             // Increase timeout to 30s for all platforms (Windows startup can be slow)
             if (!PortFinder.waitForPort(p, h, timeoutMs = 30000)) {
@@ -624,7 +656,15 @@ class OpenCodeService(private val project: Project) : Disposable {
         }
     }
 
-    private fun createTerminalUIInternal(h: String, p: Int, pwd: String?, cont: Boolean = true, command: String? = null, customBasePath: String? = null) {
+    private fun createTerminalUIInternal(
+        h: String,
+        p: Int,
+        pwd: String?,
+        cont: Boolean = true,
+        command: String? = null,
+        customBasePath: String? = null,
+        mode: OpenCodeCliCompatibility.Mode = OpenCodeCliCompatibility.Mode.LEGACY
+    ) {
         val t = "$OPEN_CODE_TAB_PREFIX($p)"
         val wd = customBasePath ?: project.basePath
         val w = TerminalView.getInstance(project).createLocalShellWidget(wd, t)
@@ -635,17 +675,129 @@ class OpenCodeService(private val project: Project) : Disposable {
             terminalEditor = FileEditorManager.getInstance(project).openFile(f, true).firstOrNull { it is OpenCodeTerminalFileEditor } as? OpenCodeTerminalFileEditor
             terminalEditor?.let { 
                 val cmd = command ?: getOpenCodeBinary()
-                w.executeCommand(buildOpenCodeCommand(cmd, h, p, pwd, cont)); pinTerminalTab(f)
+                w.executeCommand(buildOpenCodeCommand(cmd, h, p, pwd, cont, mode)); pinTerminalTab(f)
             }
         }
     }
 
-    private fun buildOpenCodeCommand(command: String, h: String, p: Int, pwd: String?, cont: Boolean): String {
-        // Quote command if it contains spaces (e.g. absolute path on Windows)
-        val cmdSafe = if (command.contains(" ")) "\"$command\"" else command
-        val base = "$cmdSafe --hostname $h --port $p${if (cont) " --continue" else ""}"
-        if (pwd.isNullOrBlank()) return base
-        return if (isWindows()) "cmd /c \"set \"OPENCODE_SERVER_PASSWORD=${pwd.replace("\"", "\\\"")}\" && $base\"" else "OPENCODE_SERVER_PASSWORD='${pwd.replace("'", "'\\''")}' $base"
+    private fun buildOpenCodeCommand(
+        command: String,
+        h: String,
+        p: Int,
+        pwd: String?,
+        cont: Boolean,
+        mode: OpenCodeCliCompatibility.Mode = OpenCodeCliCompatibility.Mode.LEGACY
+    ): String {
+        val terminalCommand = OpenCodeCliCompatibility.terminalCommand(command, h, p, cont, mode)
+        return OpenCodeCliCompatibility.withPassword(terminalCommand, pwd ?: "", isWindows())
+    }
+
+    /**
+     * Detects which OpenCode CLI syntax the binary speaks and caches the answer for the project.
+     * Must be called off the EDT because it starts the CLI twice.
+     */
+    private fun detectCliMode(command: String): OpenCodeCliCompatibility.Mode {
+        cliMode?.let { return it }
+        val fromVersion = runCliProbe(command, "--version")
+            ?.takeIf { (exitCode, _) -> exitCode == 0 }
+            ?.let { (_, output) -> OpenCodeCliCompatibility.modeFromVersionOutput(output) }
+        val mode = fromVersion ?: runCliProbe(command, "--help")
+            ?.takeIf { (exitCode, _) -> exitCode == 0 }
+            ?.let { (_, output) -> OpenCodeCliCompatibility.modeFromHelpOutput(output) }
+            ?: OpenCodeCliCompatibility.Mode.LEGACY
+        cliMode = mode
+        logger.info("[OpenCode] Detected CLI syntax: $mode")
+        return mode
+    }
+
+    private fun runCliProbe(command: String, vararg arguments: String): Pair<Int, String>? {
+        return try {
+            val result = CapturingProcessHandler(GeneralCommandLine(command).withParameters(*arguments)).runProcess(5000)
+            result.exitCode to (result.stdout + "\n" + result.stderr)
+        } catch (e: Exception) {
+            logger.debug("[OpenCode] CLI probe ${arguments.joinToString(" ")} failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Starts `opencode serve` for CLI v2, because v2 no longer starts a server from the root
+     * command. The server is owned by this service and stopped in [terminateProcess].
+     */
+    private fun startV2Server(
+        command: String,
+        host: String,
+        port: Int,
+        pwd: String?,
+        customBasePath: String?
+    ): String? {
+        if (serverProcess?.isAlive == true) return v2ServerPassword
+        val builder = ProcessBuilder(listOf(command) + OpenCodeCliCompatibility.serverArguments(host, port))
+        val workingDirectory = customBasePath ?: project.basePath
+        if (!workingDirectory.isNullOrBlank()) {
+            builder.directory(java.io.File(workingDirectory))
+        }
+        builder.redirectErrorStream(true)
+        // v2 always protects the server with a password: when the user did not configure one the
+        // CLI would generate a random value we could not pass to the attaching TUI, so generate one
+        // ourselves and reuse it for both the server and the client.
+        val effectivePassword = pwd?.takeIf { it.isNotBlank() } ?: java.util.UUID.randomUUID().toString()
+        v2ServerPassword = effectivePassword
+        builder.environment()["OPENCODE_PASSWORD"] = effectivePassword
+        builder.environment()["OPENCODE_SERVER_PASSWORD"] = effectivePassword
+        val process = try {
+            builder.start()
+        } catch (e: Exception) {
+            logger.warn("[OpenCode] Failed to start the OpenCode v2 server", e)
+            showLaunchError("Could not start the OpenCode v2 server: ${e.message}")
+            return null
+        }
+        serverProcess = process
+        Thread({
+            try {
+                process.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { logger.info("[OpenCode v2 server] $it") }
+                }
+            } catch (_: Exception) {
+                // Stream closed when the server stops.
+            }
+        }, "OpenCode-v2-server-output").apply {
+            isDaemon = true
+            start()
+        }
+        if (!PortFinder.waitForPort(port, host, timeoutMs = 30_000, requireHealth = true)) {
+            logger.warn("[OpenCode] OpenCode v2 server did not become ready on $host:$port")
+            stopV2Server()
+            showLaunchError("OpenCode v2 server did not become ready on $host:$port")
+            return null
+        }
+        logger.info("[OpenCode] OpenCode v2 server is ready on $host:$port")
+        return effectivePassword
+    }
+
+    private fun stopV2Server() {
+        val process = serverProcess ?: return
+        serverProcess = null
+        v2ServerPassword = null
+        try {
+            process.toHandle().descendants().forEach { it.destroy() }
+            process.destroy()
+            if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                process.toHandle().descendants().forEach { it.destroyForcibly() }
+                process.destroyForcibly()
+            }
+        } catch (_: Exception) {
+            // Best effort: the process is already gone.
+        }
+    }
+
+    private fun showLaunchError(message: String) {
+        logger.warn("[OpenCode] $message")
+        ApplicationManager.getApplication().invokeLater {
+            if (!project.isDisposed()) {
+                Messages.showErrorDialog(project, message, "OpenCode")
+            }
+        }
     }
 
     @Volatile private var _cachedBinary: String? = null
@@ -774,12 +926,18 @@ class OpenCodeService(private val project: Project) : Disposable {
             focusTerminalUI()
         } else {
             // Terminal UI doesn't exist, need to create new terminal and start opencode
-            try {
-                createTerminalUIInternal(hostname, port ?: return, password, false)
-            } catch (e: Exception) {
-                logger.warn("[OpenCode] Failed to create terminal UI", e)
+            AppExecutorUtil.getAppExecutorService().submit {
+                val bin = detectOpenCodeBinary()
+                val mode = cliMode ?: if (bin != null) detectCliMode(bin) else OpenCodeCliCompatibility.Mode.LEGACY
                 ApplicationManager.getApplication().invokeLater {
-                    Messages.showErrorDialog(project, "Failed to create terminal: ${e.message}", "OpenCode")
+                    if (project.isDisposed) return@invokeLater
+                    val currentPort = port ?: return@invokeLater
+                    try {
+                        createTerminalUIInternal(hostname, currentPort, password, false, null, null, mode)
+                    } catch (e: Exception) {
+                        logger.warn("[OpenCode] Failed to create terminal UI", e)
+                        Messages.showErrorDialog(project, "Failed to create terminal: ${e.message}", "OpenCode")
+                    }
                 }
             }
         }

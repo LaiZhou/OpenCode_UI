@@ -73,31 +73,42 @@ object PortFinder {
         username: String? = null,
         password: String? = null
     ): Boolean {
+        val probePaths = OpenCodeCliCompatibility.healthProbePaths()
+        for (path in probePaths) {
+            val responseCode = probeStatus("http://$hostname:$port$path", username, password) ?: continue
+            // 401/403 prove an authenticated OpenCode server is listening; 400 is how the v2
+            // /api/session route answers a probe without a location parameter.
+            val isHealthy = responseCode == 200 || responseCode == 401 || responseCode == 403 ||
+                (path == "/api/session" && responseCode == 400)
+            if (isHealthy) {
+                return true
+            }
+            logger.debug("Health check failed for $hostname:$port$path. Response code: $responseCode")
+        }
+        return false
+    }
+
+    /** Probes one URL and returns its HTTP status, or null when nothing answers. */
+    private fun probeStatus(url: String, username: String?, password: String?): Int? {
         return try {
-            val url = java.net.URL("http://$hostname:$port/global/health")
-            val connection = url.openConnection(Proxy.NO_PROXY) as java.net.HttpURLConnection
+            val connection = java.net.URL(url).openConnection(Proxy.NO_PROXY) as java.net.HttpURLConnection
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
             connection.requestMethod = "GET"
             connection.instanceFollowRedirects = false
-            
+
             if (username != null && password != null) {
                 val credentials = "$username:$password"
                 val encodedCredentials = java.util.Base64.getEncoder().encodeToString(credentials.toByteArray())
                 connection.setRequestProperty("Authorization", "Basic $encodedCredentials")
             }
-            
+
             val responseCode = connection.responseCode
             connection.disconnect()
-            
-            val isHealthy = responseCode == 200 || responseCode == 401 || responseCode == 403
-            if (!isHealthy) {
-                logger.debug("Health check failed for $hostname:$port. Response code: $responseCode")
-            }
-            isHealthy
+            responseCode
         } catch (e: Exception) {
-            logger.debug("Health check failed for $hostname:$port. Error: ${e.message}")
-            false
+            logger.debug("Health check failed for $url. Error: ${e.message}")
+            null
         }
     }
 
